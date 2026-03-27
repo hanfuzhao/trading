@@ -1,12 +1,13 @@
 """
-交易仪表盘 + 自动交易Bot - 一体化服务
-启动后 Bot 在后台 24 小时自动运行，仪表盘实时展示所有活动
+交易仪表盘 + 自动交易Bot v3 — 一体化服务
+完整实现策略手册第十章「一天的完整流程」
 """
 import json
 import os
 import sys
 import time
 import threading
+import traceback
 from collections import deque
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
@@ -18,10 +19,13 @@ ET = ZoneInfo("America/New_York")
 from config import (
     ALPACA_API_KEY, ALPACA_API_SECRET, OPENAI_API_KEY,
     MODEL_FAST, MODEL_DEEP, MODEL_RANK, LOG_DIR,
-    RSI_OVERSOLD, RSI_OVERBOUGHT, VOLUME_SPIKE_RATIO,
-    GAP_THRESHOLD_PCT, INTRADAY_MOMENTUM_PCT, VWAP_DEVIATION_PCT,
-    MAX_POSITION_PCT, MAX_SINGLE_LOSS_PCT, MAX_DAILY_LOSS_PCT,
-    MAX_CAPITAL,
+    VOL_REGIMES, MAX_CONCURRENT_POSITIONS, MAX_CAPITAL,
+    MAX_DAILY_LOSS_PCT,
+    ENTRY_WINDOW_1_START, ENTRY_WINDOW_1_END,
+    ENTRY_WINDOW_2_START, ENTRY_WINDOW_2_END,
+    BLACKOUT_OPEN_END, MIDDAY_DEAD_START, MIDDAY_DEAD_END,
+    NO_NEW_POSITION_AFTER,
+    MONDAY_MIN_SCORE,
 )
 from scanner import MarketScanner
 from news_analyzer import NewsAnalyzer
@@ -35,7 +39,7 @@ app = Flask(__name__)
 CORS(app)
 
 # ================================================================
-# 全局共享状态 (bot 写，dashboard 读)
+# 全局共享状态
 # ================================================================
 state = {
     "bot_status": "initializing",
@@ -54,14 +58,16 @@ state = {
 
 lock = threading.Lock()
 
+
 def log_activity(msg, level="info"):
     ts = datetime.now(ET).strftime("%H:%M:%S")
     with lock:
         state["activity_log"].append({"time": ts, "msg": msg, "level": level})
     print(f"[{ts}] {msg}")
 
+
 # ================================================================
-# Bot 核心组件 (延迟初始化)
+# 核心组件（延迟初始化）
 # ================================================================
 scanner = None
 news_analyzer_inst = None
@@ -70,6 +76,7 @@ executor = None
 pdt = None
 risk = None
 openai_client = None
+
 
 def init_components():
     global scanner, news_analyzer_inst, ranker, executor, pdt, risk, openai_client
@@ -88,8 +95,53 @@ def init_components():
     print("[Bot] 初始化 OpenAI...")
     openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
+
 # ================================================================
-# Bot 自动运行循环 (后台线程)
+# 时间工具
+# ================================================================
+def _hm(t=None):
+    """返回当前美东时间的 HHMM 整数，方便比较"""
+    t = t or datetime.now(ET)
+    return t.hour * 100 + t.minute
+
+
+def _parse_hm(s: str) -> int:
+    return int(s.replace(":", ""))
+
+
+def _is_entry_allowed() -> bool:
+    """v3第六章：仅在两个入场窗口内允许开仓"""
+    hm = _hm()
+    w1 = _parse_hm(ENTRY_WINDOW_1_START) <= hm < _parse_hm(ENTRY_WINDOW_1_END)
+    w2 = _parse_hm(ENTRY_WINDOW_2_START) <= hm < _parse_hm(ENTRY_WINDOW_2_END)
+    return w1 or w2
+
+
+def _is_power_hour() -> bool:
+    hm = _hm()
+    return _parse_hm(ENTRY_WINDOW_2_START) <= hm < _parse_hm(ENTRY_WINDOW_2_END)
+
+
+# ================================================================
+# 宏观评分（v3第四章：SPY ±30 + VIXY ±20 + USO ±20 → 归一化0-100）
+# ================================================================
+def _calc_macro_score() -> float:
+    score = 50
+    spy_chg = scanner.get_spy_change()
+    score += min(max(spy_chg * 10, -30), 30)
+
+    vol_regime = scanner.get_vol_regime()
+    vixy_adj = {"low": 15, "medium": 0, "high": -10, "extreme": -20}
+    score += vixy_adj.get(vol_regime, 0)
+
+    uso_chg = scanner.get_uso_change()
+    score += min(max(uso_chg * 4, -20), 20)
+
+    return max(0, min(100, score))
+
+
+# ================================================================
+# Bot 主循环（v3第十章完整流程）
 # ================================================================
 def bot_loop():
     try:
@@ -98,18 +150,17 @@ def bot_loop():
         print("[Bot] 组件初始化完成")
     except Exception as e:
         print(f"[Bot] 初始化失败: {e}")
-        import traceback
         traceback.print_exc()
         state["bot_status"] = "error"
         state["error"] = f"初始化失败: {e}"
         return
 
-    log_activity("Bot 初始化完成，开始自动监控")
+    log_activity("Bot v3 初始化完成")
     state["bot_status"] = "running"
 
     try:
         account = executor.get_account()
-        log_activity(f"账户连接成功 | 总值 ${account['portfolio_value']:,.2f} | 现金 ${account['cash']:,.2f}")
+        log_activity(f"账户 ${account['portfolio_value']:,.2f} | 现金 ${account['cash']:,.2f}")
         log_activity(f"PDT: {pdt.status()}")
     except Exception as e:
         log_activity(f"Alpaca 连接失败: {e}", "error")
@@ -118,21 +169,23 @@ def bot_loop():
         return
 
     last_tech_scan = 0
-    last_position_monitor = 0
-    completed_news_rounds: set = set()
-    eod_done = False
+    last_pos_monitor = 0
+    last_pos_news = 0
+    last_web_search = 0
+    daily_init_done: str = ""
+    o3_premarket_done: str = ""
+    eod_done: str = ""
+    close_profitable_done: str = ""
+    close_all_done: str = ""
+    final_check_done: str = ""
 
     while True:
         try:
             now = datetime.now(ET)
             today_str = now.strftime("%Y-%m-%d")
+            hm = _hm(now)
 
-            # 每天零点重置
-            if not any(today_str in r for r in completed_news_rounds):
-                completed_news_rounds = set()
-                eod_done = False
-
-            # 周末休眠
+            # ── 周末 ──
             if now.weekday() >= 5:
                 if state["bot_status"] != "weekend":
                     state["bot_status"] = "weekend"
@@ -140,79 +193,196 @@ def bot_loop():
                 time.sleep(300)
                 continue
 
-            # 收盘后
-            if now.hour >= 16 and now.hour < 20:
-                if state["bot_status"] != "after_hours":
-                    state["bot_status"] = "after_hours"
-                    if not eod_done:
-                        log_activity("市场已收盘，进入盘后监控")
-                        _generate_eod()
-                        eod_done = True
-                time.sleep(120)
-                continue
-
-            # 深夜休眠
+            # ── 深夜 20:00 - 04:00 ──
             if now.hour >= 20 or now.hour < 4:
                 if state["bot_status"] != "sleeping":
                     state["bot_status"] = "sleeping"
-                    log_activity("深夜休眠中，04:00 AM ET 恢复")
+                    log_activity("深夜休眠，04:00 恢复")
                 time.sleep(300)
                 continue
 
-            # 凌晨 4-9:30 盘前
-            if now.hour < 9 or (now.hour == 9 and now.minute < 30):
+            # ══════════════════════════════════════
+            # 04:00 — 每日初始化
+            # ══════════════════════════════════════
+            if daily_init_done != today_str and now.hour >= 4:
+                daily_init_done = today_str
+                eod_done = ""
+                close_profitable_done = ""
+                close_all_done = ""
+                final_check_done = ""
+                o3_premarket_done = ""
+                state["today_trades"] = []
+                state["news_results"] = {}
+                state["recommendations"] = []
+                state["scan_count"] = 0
+
+                log_activity("═══ 每日初始化 ═══")
+                log_activity(f"PDT 剩余名额: {pdt.remaining_trades()}")
+
+                scanner.refresh_market_data()
+                log_activity(f"VIXY: ${scanner.get_vixy_price():.2f} → regime: {scanner.get_vol_regime()}")
+                log_activity(f"SPY 日变化: {scanner.get_spy_change():+.2f}%")
+                log_activity(f"USO 日变化: {scanner.get_uso_change():+.2f}%")
+
+                scanner.get_tradeable_universe(force_refresh=True)
+
+            # ══════════════════════════════════════
+            # 04:05 - 09:25 — 盘前扫描
+            # ══════════════════════════════════════
+            if now.hour < 9 or (now.hour == 9 and now.minute < 25):
                 if state["bot_status"] != "premarket":
                     state["bot_status"] = "premarket"
                     log_activity("盘前监控模式")
 
-                # 盘前技术扫描（每 30 分钟，轻量级）
+                # 盘前技术扫描（每30分钟）
                 if time.time() - last_tech_scan >= 1800:
-                    _run_tech_scan_only()
+                    _run_tech_scan()
                     last_tech_scan = time.time()
 
-                # 检查是否到了新闻分析时间
-                _check_news_schedule(now, today_str, completed_news_rounds)
+                # 08:30 Web Search 补充
+                if hm >= 830 and time.time() - last_web_search >= 3600:
+                    _run_web_search_supplement()
+                    last_web_search = time.time()
 
                 time.sleep(60)
                 continue
 
-            # 盘中 9:30 - 16:00
-            state["bot_status"] = "market_open"
+            # ══════════════════════════════════════
+            # 09:00 - 09:25 — o3 盘前排名
+            # ══════════════════════════════════════
+            if 900 <= hm < 930 and o3_premarket_done != today_str:
+                o3_premarket_done = today_str
+                log_activity("═══ o3 盘前排名 ═══")
+                _run_news_analysis()
+                _run_o3_ranking()
 
-            # 尾盘强制平仓
-            if now.hour == 15 and now.minute >= 50:
-                positions_before = executor.get_positions()
-                if executor.check_force_close():
-                    for p in positions_before:
-                        if p["ticker"] in {"SGOV"}:
-                            continue
+            # ══════════════════════════════════════
+            # 09:30 - 09:45 — 开盘观察期（不下单，只扫描）
+            # ══════════════════════════════════════
+            if 930 <= hm < 945:
+                state["bot_status"] = "observing"
+                if time.time() - last_tech_scan >= 60:
+                    _run_tech_scan()
+                    last_tech_scan = time.time()
+                if time.time() - last_pos_monitor >= 15:
+                    _monitor_positions()
+                    last_pos_monitor = time.time()
+                time.sleep(5)
+                continue
+
+            # ══════════════════════════════════════
+            # 15:30+ — 尾盘收盘程序
+            # ══════════════════════════════════════
+            if hm >= 1530:
+                state["bot_status"] = "closing"
+
+                # 15:45 盈利持仓平仓
+                if hm >= 1545 and close_profitable_done != today_str:
+                    close_profitable_done = today_str
+                    closed = executor.close_profitable_positions()
+                    for p in closed:
                         risk.record_trade_result(p["unrealized_pnl"])
                         pdt.record_day_trade(p["ticker"], p["unrealized_pnl"])
-                        log_activity(f"尾盘平仓 {p['ticker']} PnL: ${p['unrealized_pnl']:+.2f}", "warning")
+                        log_activity(f"15:45 锁利: {p['ticker']} PnL${p['unrealized_pnl']:+.2f}")
 
-            # 持仓监控 (每 30 秒)
-            if time.time() - last_position_monitor >= 30:
+                # 15:48 全部平仓
+                if hm >= 1548 and close_all_done != today_str:
+                    close_all_done = today_str
+                    executor.cancel_pending_orders()
+                    closed = executor.close_remaining_positions()
+                    for p in closed:
+                        risk.record_trade_result(p["unrealized_pnl"])
+                        pdt.record_day_trade(p["ticker"], p["unrealized_pnl"])
+                        log_activity(f"15:48 强平: {p['ticker']} PnL${p['unrealized_pnl']:+.2f}")
+
+                # 15:50 最终确认
+                if hm >= 1550 and final_check_done != today_str:
+                    final_check_done = today_str
+                    executor.confirm_zero_positions()
+
+                # 持仓监控（每分钟）
+                if time.time() - last_pos_monitor >= 60:
+                    _monitor_positions()
+                    last_pos_monitor = time.time()
+
+                time.sleep(10)
+                continue
+
+            # ══════════════════════════════════════
+            # 16:00 - 20:00 — 盘后
+            # ══════════════════════════════════════
+            if now.hour >= 16:
+                if eod_done != today_str:
+                    eod_done = today_str
+                    state["bot_status"] = "after_hours"
+                    _generate_eod()
+                time.sleep(120)
+                continue
+
+            # ══════════════════════════════════════
+            # 09:45 - 15:30 — 盘中交易
+            # ══════════════════════════════════════
+            state["bot_status"] = "market_open"
+
+            # 持仓监控（每15秒）
+            if time.time() - last_pos_monitor >= 15:
                 _monitor_positions()
-                last_position_monitor = time.time()
+                last_pos_monitor = time.time()
 
-            # 技术面扫描 (每 15 分钟，免费)
-            if time.time() - last_tech_scan >= 900:
-                _run_tech_scan_only()
+            # 持仓新闻轮询（每5分钟）
+            if time.time() - last_pos_news >= 300:
+                _check_position_news()
+                last_pos_news = time.time()
+
+            # 技术面扫描（频率由时段决定）
+            scan_interval = _get_scan_interval(hm)
+            if time.time() - last_tech_scan >= scan_interval:
+                _run_tech_scan()
                 last_tech_scan = time.time()
 
-            # 检查是否到了新闻分析时间
-            _check_news_schedule(now, today_str, completed_news_rounds)
+            # 每小时 Web Search 对 Top20 候选
+            if time.time() - last_web_search >= 3600:
+                _run_web_search_supplement()
+                last_web_search = time.time()
 
-            time.sleep(15)
+            # 入场窗口内：检查推荐并执行
+            if _is_entry_allowed() and state["recommendations"]:
+                _try_execute_recommendations()
+
+            time.sleep(5)
 
         except Exception as e:
             log_activity(f"Bot 主循环异常: {e}", "error")
+            traceback.print_exc()
             state["error"] = str(e)
             time.sleep(30)
 
 
-def _run_tech_scan_only():
-    """仅技术面扫描（免费，不调用 OpenAI），更新候选列表"""
+# ================================================================
+# 扫描频率（v3第三章3.2节）
+# ================================================================
+def _get_scan_interval(hm: int) -> int:
+    if hm < 925:
+        return 1800
+    if hm < 945:
+        return 60
+    if hm < 1015:
+        return 300
+    if hm < 1130:
+        return 900
+    if hm < 1330:
+        return 1800
+    if hm < 1445:
+        return 900
+    if hm < 1530:
+        return 300
+    return 60
+
+
+# ================================================================
+# 技术面扫描（免费，不调用 OpenAI）
+# ================================================================
+def _run_tech_scan():
     state["bot_status"] = "scanning"
     try:
         candidates = scanner.scan()
@@ -221,83 +391,35 @@ def _run_tech_scan_only():
         state["last_scan_time"] = datetime.now(ET).isoformat()
         if candidates:
             top5 = ", ".join(f"{c['ticker']}({c['signal_strength']})" for c in candidates[:5])
-            log_activity(f"技术扫描完成: {len(candidates)} 只异动 | Top5: {top5}")
+            log_activity(f"扫描: {len(candidates)} 只异动 | Top5: {top5}")
         else:
-            log_activity("技术扫描完成: 无异动")
-    except Exception as e:
-        log_activity(f"技术扫描失败: {e}", "error")
-    state["bot_status"] = "market_open"
-
-
-def _check_news_schedule(now, today_str, completed_rounds):
-    """按时间表触发新闻分析轮次"""
-    NEWS_SCHEDULE = [
-        (7, 0),    # 07:00 盘前
-        (10, 0),   # 10:00 开盘后
-        (13, 0),   # 13:00 午盘
-        (15, 30),  # 15:30 尾盘前
-    ]
-    for h, m in NEWS_SCHEDULE:
-        round_key = f"{today_str}_{h:02d}{m:02d}"
-        if round_key in completed_rounds:
-            continue
-        # 在时间窗口内触发（允许 15 分钟延迟）
-        sched_minutes = h * 60 + m
-        now_minutes = now.hour * 60 + now.minute
-        if 0 <= now_minutes - sched_minutes < 15:
-            log_activity(f"📰 触发新闻分析轮次 ({h:02d}:{m:02d} ET)")
-            completed_rounds.add(round_key)
-            _run_full_pipeline()
-            return
-
-
-def _run_full_pipeline():
-    """完整的 扫描→新闻→排名→执行 管道"""
-    # 检查是否有足够现金进行新交易
-    try:
-        available_cash = executor.get_available_cash()
-        if available_cash < 50:
-            log_activity(f"可用现金 ${available_cash:.2f} 不足，跳过扫描（仅监控持仓）", "warning")
-            return
-    except Exception:
-        pass
-
-    state["bot_status"] = "scanning"
-    log_activity("开始全市场技术面扫描...")
-
-    # 第一层：扫描
-    try:
-        candidates = scanner.scan()
-        state["scan_results"] = candidates
-        state["scan_count"] = state.get("scan_count", 0) + 1
-        state["last_scan_time"] = datetime.now(ET).isoformat()
-        log_activity(f"扫描完成: {len(candidates)} 只异动股票")
-
-        if candidates:
-            top5 = [f"{c['ticker']}({c['signal_strength']})" for c in candidates[:5]]
-            log_activity(f"Top 5: {', '.join(top5)}")
+            log_activity("扫描完成: 无异动")
     except Exception as e:
         log_activity(f"扫描失败: {e}", "error")
-        state["bot_status"] = "market_open"
-        return
 
+
+# ================================================================
+# 新闻分析（Top20 → mini/5.4 → 综合评分）
+# ================================================================
+def _run_news_analysis():
+    candidates = state["scan_results"]
     if not candidates:
-        log_activity("无技术异动，等待下一轮")
-        state["bot_status"] = "market_open"
+        _run_tech_scan()
+        candidates = state["scan_results"]
+    if not candidates:
         return
 
-    # 第二层：新闻分析
     state["bot_status"] = "analyzing_news"
-    log_activity(f"开始新闻情绪分析 ({len(candidates)} 只)...")
+    top20 = sorted(candidates, key=lambda x: x["signal_strength"], reverse=True)[:20]
+    log_activity(f"新闻分析: Top {len(top20)} 只...")
+
     enriched = []
+    vol_regime = scanner.get_vol_regime()
+    high_vol = vol_regime in ("high", "extreme")
 
-    # 只对技术面 Top 20 做新闻分析（含 web search），节省 API 费用
-    candidates_for_news = sorted(candidates, key=lambda x: x["signal_strength"], reverse=True)[:20]
-    log_activity(f"从 {len(candidates)} 只中选取 Top {len(candidates_for_news)} 进行新闻分析")
-
-    for c in candidates_for_news:
+    for c in top20:
         ticker = c["ticker"]
-        tech_context = {
+        tech_ctx = {
             "price": c["price"],
             "change_pct": 0,
             "volume_ratio": c["volume_ratio"],
@@ -306,57 +428,106 @@ def _run_full_pipeline():
             "signal_strength": c["signal_strength"],
         }
         try:
-            news_result = news_analyzer_inst.analyze_ticker(ticker, tech_context)
+            news_result = news_analyzer_inst.analyze_ticker(ticker, tech_ctx)
             c["news_analysis"] = news_result
             state["news_results"][ticker] = news_result
             state["last_news_time"] = datetime.now(ET).isoformat()
 
-            has_strong_news = (
-                news_result["has_news"]
-                and abs(news_result["sentiment_score"]) > 0
-                and any(
-                    a.get("confidence", 0) >= 60 and a.get("intraday_severity", 0) >= 5
-                    for a in news_result["analyses"]
-                )
-            )
-            has_very_strong_tech = c["signal_strength"] >= 60 and c["volume_ratio"] >= 5
-            has_news_no_price_action = (
-                news_result["has_news"]
-                and abs(news_result["sentiment_score"]) > 30
-                and c["volume_ratio"] < 2
-            )
+            # v3第四章4.6: 进入第三层的条件
+            pass_filter = False
+            analyses = news_result.get("analyses", [])
 
-            if has_strong_news or has_very_strong_tech or has_news_no_price_action:
-                tech_score = c["signal_strength"]
-                news_score = news_result["sentiment_score"]
-                # 综合分用绝对值排序，但保留方向信息供 o3 判断
-                combined = tech_score * 0.4 + abs(news_score) * 0.6
-                if has_news_no_price_action:
-                    combined *= 1.3
-                c["combined_score"] = round(combined, 2)
-                c["news_direction"] = "bullish" if news_score > 0 else ("bearish" if news_score < 0 else "neutral")
-                enriched.append(c)
-                log_activity(f"✅ {ticker} 通过 | 综合{combined:.1f} 技术{tech_score:.1f} 新闻{news_score:.1f}")
+            # 条件1: sentiment≠neutral AND confidence≥60 AND severity≥5
+            has_strong = any(
+                a.get("confidence", 0) >= 60 and a.get("intraday_severity", 0) >= 5
+                and a.get("sentiment") != "neutral"
+                for a in analyses
+            )
+            if has_strong:
+                pass_filter = True
+
+            # 条件2: 无新闻但技术极强
+            if not news_result["has_news"] and c["signal_strength"] >= 70 and c["volume_ratio"] >= 4:
+                pass_filter = True
+
+            # 条件3: 高severity但价格未反应
+            has_unreacted = any(
+                a.get("intraday_severity", 0) >= 7
+                for a in analyses
+            ) and c["volume_ratio"] < 2
+            if has_unreacted:
+                pass_filter = True
+
+            if not pass_filter:
+                continue
+
+            # 综合评分
+            tech_score = c["signal_strength"]
+            news_score = news_result["sentiment_score"]
+            macro_score = _calc_macro_score()
+
+            # v3第四章4.5: 均值回归新闻反转
+            news_score_adj = abs(news_score)
+            if high_vol and news_score < -30:
+                structural_bad = any(
+                    a.get("is_structural") is True and a.get("intraday_severity", 0) >= 7
+                    for a in analyses
+                )
+                if structural_bad:
+                    tech_score *= 0.3
+                    news_score_adj = 0
+                else:
+                    news_score_adj = abs(news_score) * 0.6
+
+            combined = tech_score * 0.45 + news_score_adj * 0.35 + macro_score * 0.20
+
+            c["combined_score"] = round(combined, 2)
+            c["news_direction"] = "bullish" if news_score > 0 else ("bearish" if news_score < 0 else "neutral")
+            enriched.append(c)
+            log_activity(f"✅ {ticker} | 综合{combined:.1f} T{tech_score:.0f} N{news_score:.1f} M{macro_score:.0f}")
         except Exception as e:
             log_activity(f"新闻分析 {ticker} 失败: {e}", "error")
 
     enriched.sort(key=lambda x: x.get("combined_score", 0), reverse=True)
-    log_activity(f"新闻筛选完成: {len(enriched)}/{len(candidates)} 只通过")
+    state["enriched_candidates"] = enriched[:20]
+    log_activity(f"新闻筛选: {len(enriched)}/{len(top20)} 通过")
 
+
+# ================================================================
+# Web Search 补充（每小时对Top20候选）
+# ================================================================
+def _run_web_search_supplement():
+    candidates = state["scan_results"][:20]
+    if not candidates:
+        return
+    log_activity(f"Web Search 补充: {len(candidates)} 只")
+    for c in candidates:
+        if c["ticker"] in state["news_results"]:
+            continue
+        try:
+            news = news_analyzer_inst.web_search_supplement(c["ticker"])
+            if news:
+                result = news_analyzer_inst.analyze_ticker(c["ticker"])
+                state["news_results"][c["ticker"]] = result
+        except Exception:
+            pass
+
+
+# ================================================================
+# o3 排名
+# ================================================================
+def _run_o3_ranking():
+    enriched = state.get("enriched_candidates", [])
     if not enriched:
-        log_activity("无候选通过新闻筛选，等待下一轮")
-        state["bot_status"] = "market_open"
+        log_activity("无候选通过新闻筛选，跳过o3")
         return
 
-    # 检查PDT
     if not pdt.can_day_trade():
         log_activity(f"PDT 名额已用完 ({pdt.status()})，仅记录信号", "warning")
-        state["bot_status"] = "market_open"
         return
 
-    # 第三层：o3 排名
     state["bot_status"] = "ranking"
-    log_activity(f"调用 o3 深度排名 ({len(enriched[:20])} 只)...")
+    log_activity(f"调用 o3 深度排名 ({len(enriched)} 只)...")
 
     try:
         account = executor.get_account()
@@ -366,6 +537,9 @@ def _run_full_pipeline():
         weekday = ["周一", "周二", "周三", "周四", "周五"][min(now.weekday(), 4)]
         remaining_days = max(5 - now.weekday(), 1)
 
+        vol_regime = scanner.get_vol_regime()
+        scan_mode = enriched[0].get("scan_mode", "momentum")
+
         ranking = ranker.rank_candidates(
             candidates=enriched[:20],
             remaining_day_trades=remaining,
@@ -374,37 +548,55 @@ def _run_full_pipeline():
             current_positions=positions,
             weekday=weekday,
             remaining_trading_days=remaining_days,
+            vol_regime=vol_regime,
+            scan_mode=scan_mode,
+            spy_change_pct=scanner.get_spy_change(),
+            uso_change_pct=scanner.get_uso_change(),
         )
         state["ranking_result"] = ranking
         state["recommendations"] = ranking.get("recommendations", [])
 
         if ranking.get("save_bullets"):
-            log_activity(f"💾 o3 建议保留名额: {ranking.get('save_reason', '')}", "warning")
+            log_activity(f"💾 o3: {ranking.get('save_reason', '')}", "warning")
 
         for rec in ranking.get("recommendations", []):
-            log_activity(f"🎯 #{rec['rank']} {rec['ticker']} | {rec['action']} | "
-                        f"置信度{rec.get('confidence', 0)} | "
-                        f"入场${rec.get('entry_price', 0):.2f} 止损${rec.get('stop_loss', 0):.2f} 止盈${rec.get('take_profit', 0):.2f}")
+            log_activity(
+                f"🎯 #{rec['rank']} {rec['ticker']} | "
+                f"置信度{rec.get('confidence', 0)} R:R{rec.get('risk_reward_ratio', 0):.1f} | "
+                f"入场${rec.get('entry_price', 0):.2f} SL${rec.get('stop_loss', 0):.2f}"
+            )
     except Exception as e:
         log_activity(f"o3 排名失败: {e}", "error")
-        state["bot_status"] = "market_open"
-        return
+        traceback.print_exc()
 
-    # 第四层：执行
-    state["bot_status"] = "executing"
-    for rec in ranking.get("recommendations", []):
+
+# ================================================================
+# 执行推荐
+# ================================================================
+def _try_execute_recommendations():
+    for rec in list(state["recommendations"]):
         _execute_recommendation(rec)
-
-    state["bot_status"] = "market_open"
-    log_activity("本轮管道完成，恢复监控")
+    state["recommendations"] = []
 
 
 def _execute_recommendation(rec):
     ticker = rec["ticker"]
-    action = rec["action"]
+
+    if not _is_entry_allowed():
+        return
+
+    # Power Hour: R:R ≥ 2.0
+    if _is_power_hour() and rec.get("risk_reward_ratio", 0) < 2.0:
+        log_activity(f"⏳ Power Hour {ticker} R:R{rec.get('risk_reward_ratio', 0):.1f} < 2.0，跳过", "warning")
+        return
 
     if not pdt.can_day_trade():
         log_activity(f"⛔ PDT 名额不足，跳过 {ticker}", "warning")
+        return
+
+    now_hm = _hm()
+    if now_hm >= _parse_hm(NO_NEW_POSITION_AFTER):
+        log_activity(f"⏳ {NO_NEW_POSITION_AFTER} 后不开新仓，跳过 {ticker}", "warning")
         return
 
     account = executor.get_account()
@@ -413,99 +605,135 @@ def _execute_recommendation(rec):
         log_activity(f"⛔ 风控拦截 {ticker}: {reason}", "warning")
         return
 
-    # 检查实际可用现金
     available_cash = executor.get_available_cash()
-    min_order = rec.get("entry_price", 0) * 1
-    if available_cash < min_order:
-        log_activity(f"⛔ 现金不足 ${available_cash:.2f}，跳过 {ticker}", "warning")
+    if available_cash < rec.get("entry_price", 0):
+        log_activity(f"⛔ 现金${available_cash:.2f}不足，跳过 {ticker}", "warning")
         return
 
+    vol_regime = scanner.get_vol_regime()
     positions = executor.get_positions()
     active_pos = [p for p in positions if p["ticker"] not in {"SGOV"}]
+
     valid, msg, order_params = risk.validate_order(
-        ticker=ticker, action=action,
+        ticker=ticker,
         price=rec.get("entry_price", 0),
         stop_loss=rec.get("stop_loss", 0),
         position_size_pct=rec.get("position_size_pct", 10),
         portfolio_value=account["portfolio_value"],
         current_positions=len(active_pos),
+        vol_regime=vol_regime,
     )
-
     if not valid:
         log_activity(f"⛔ 订单校验失败 {ticker}: {msg}", "warning")
         return
 
-    # 限制实际股数不超过现金可买数量
     shares = order_params["shares"]
-    max_shares_by_cash = int(available_cash / rec.get("entry_price", 1))
-    if shares > max_shares_by_cash:
-        shares = max_shares_by_cash
+    max_by_cash = int(available_cash / rec.get("entry_price", 1))
+    if shares > max_by_cash:
+        shares = max_by_cash
     if shares <= 0:
-        log_activity(f"⛔ 现金 ${available_cash:.2f} 不够买 1 股 {ticker}", "warning")
+        log_activity(f"⛔ 现金不够买1股 {ticker}", "warning")
         return
 
+    # 计算TP1/TP2（如果o3没提供，用风险管理器算）
+    tp1 = rec.get("take_profit_1", 0)
+    tp2 = rec.get("take_profit_2", 0)
+    atr = 0
+    for c in state.get("enriched_candidates", []):
+        if c["ticker"] == ticker:
+            atr = c.get("indicators", {}).get("atr", 0)
+            break
+    if not tp1 or not tp2:
+        stops = risk.calculate_stops(rec["entry_price"], atr, vol_regime)
+        tp1 = tp1 or stops["take_profit_1"]
+        tp2 = tp2 or stops["take_profit_2"]
+
     success, msg = executor.execute_entry(
-        ticker=ticker, action=action, shares=shares,
+        ticker=ticker, shares=shares,
         entry_price=rec["entry_price"],
         stop_loss=rec["stop_loss"],
-        take_profit=rec["take_profit"],
+        take_profit_1=tp1, take_profit_2=tp2,
+        atr=atr,
     )
 
     if success:
-        log_activity(f"✅ 已成交: {action} {shares}股 {ticker} | {msg}")
+        log_activity(f"✅ BUY {shares}股 {ticker} | {msg}")
         state["today_trades"].append({
             "time": datetime.now(ET).isoformat(),
-            "ticker": ticker, "action": action, "shares": shares,
+            "ticker": ticker, "action": "BUY", "shares": shares,
             "price": rec["entry_price"],
             "stop_loss": rec["stop_loss"],
-            "take_profit": rec["take_profit"],
+            "tp1": tp1, "tp2": tp2,
         })
     else:
         log_activity(f"❌ 下单失败 {ticker}: {msg}", "error")
 
 
+# ================================================================
+# 持仓监控（v3: 每15秒）
+# ================================================================
 def _monitor_positions():
     try:
         positions = executor.get_positions()
         for p in positions:
             if p["ticker"] in {"SGOV"}:
                 continue
+            if executor.check_time_stop(p["ticker"], p["current_price"]):
+                pnl = p["unrealized_pnl"]
+                risk.record_trade_result(pnl)
+                pdt.record_day_trade(p["ticker"], pnl)
+                log_activity(f"⏰ {p['ticker']} 时间止损 PnL${pnl:+.2f}", "warning")
+                continue
             executor.update_trailing_stop(p["ticker"], p["current_price"])
 
-        # 检测已被 broker 平仓的交易（止损/止盈成交），记录 PnL 和 PDT
         closed_trades = executor.check_closed_trades()
         for ct in closed_trades:
             pnl = ct["pnl"]
             risk.record_trade_result(pnl)
             pdt.record_day_trade(ct["ticker"], pnl)
-            log_activity(
-                f"{'📈' if pnl >= 0 else '📉'} {ct['ticker']} 自动平仓 | PnL: ${pnl:+.2f}",
-                "info" if pnl >= 0 else "warning"
-            )
+            emoji = '📈' if pnl >= 0 else '📉'
+            log_activity(f"{emoji} {ct['ticker']} 自动平仓 PnL${pnl:+.2f}")
     except Exception as e:
         log_activity(f"持仓监控异常: {e}", "error")
 
 
+# ================================================================
+# 持仓新闻轮询（v3: 每5分钟，severity≥8 → o3紧急评估）
+# ================================================================
 def _check_position_news():
     try:
         positions = executor.get_positions()
         for p in positions:
-            if p["ticker"] == "SGOV":
+            if p["ticker"] in {"SGOV"}:
                 continue
             news_result = news_analyzer_inst.analyze_ticker(p["ticker"])
-            if news_result["has_news"] and abs(news_result["sentiment_score"]) > 50:
-                log_activity(f"⚠️ {p['ticker']} 重要新闻 | 情绪分 {news_result['sentiment_score']}", "warning")
+            if news_result["has_news"]:
                 state["news_results"][p["ticker"]] = news_result
+                for a in news_result.get("analyses", []):
+                    if a.get("intraday_severity", 0) >= 8:
+                        log_activity(f"⚠️ {p['ticker']} severity≥8 新闻: {a.get('headline', '')[:60]}", "warning")
+                        _run_news_analysis()
+                        _run_o3_ranking()
+                        return
     except Exception:
         pass
 
 
+# ================================================================
+# EOD 日终报告
+# ================================================================
 def _generate_eod():
     try:
         account = executor.get_account()
-        log_activity(f"日终报告 | 总值 ${account['portfolio_value']:,.2f} | 扫描 {state['scan_count']} 次 | 交易 {len(state['today_trades'])} 笔")
+        log_activity(
+            f"═══ 日终报告 ═══\n"
+            f"  总值 ${account['portfolio_value']:,.2f}\n"
+            f"  扫描 {state['scan_count']} 次 | 交易 {len(state['today_trades'])} 笔\n"
+            f"  风险状态: {risk.status(account['portfolio_value'])}"
+        )
     except Exception:
         pass
+
 
 # ================================================================
 # API 路由
@@ -514,6 +742,7 @@ def _generate_eod():
 @app.route("/")
 def index():
     return send_file("dashboard.html")
+
 
 @app.route("/api/account")
 def api_account():
@@ -526,9 +755,11 @@ def api_account():
             "pdt_remaining": pdt.remaining_trades(),
             "risk_status": risk.status(account["portfolio_value"]),
             "max_capital": MAX_CAPITAL,
+            "vol_regime": scanner.get_vol_regime() if scanner else "N/A",
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/state")
 def api_state():
@@ -547,6 +778,7 @@ def api_state():
         "error": state["error"],
     })
 
+
 @app.route("/api/scan/results")
 def api_scan_results():
     results = []
@@ -558,13 +790,15 @@ def api_scan_results():
             "signal_strength": c["signal_strength"],
             "signals": c["signals"],
             "indicators": c["indicators"],
-            "signal_details": _explain_signals(c),
+            "beta": c.get("beta"),
+            "sector": c.get("sector"),
             "combined_score": c.get("combined_score"),
         }
         if c["ticker"] in state["news_results"]:
             item["news"] = state["news_results"][c["ticker"]]
         results.append(item)
     return jsonify({"results": results, "count": len(results)})
+
 
 @app.route("/api/news/<ticker>")
 def api_news_ticker(ticker):
@@ -577,6 +811,7 @@ def api_news_ticker(ticker):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     user_msg = request.json.get("message", "")
@@ -586,102 +821,64 @@ def api_chat():
     try:
         account = executor.get_account()
         positions = executor.get_positions()
-    except:
-        account = {"portfolio_value": 0, "cash": 0, "buying_power": 0}
+    except Exception:
+        account = {"portfolio_value": 0, "cash": 0}
         positions = []
 
     with lock:
         recent_logs = [f"[{l['time']}] {l['msg']}" for l in list(state["activity_log"])[-20:]]
 
-    context = f"""你是一个专业的美股日内交易助手。以下是当前系统实时状态：
+    params = VOL_REGIMES.get(scanner.get_vol_regime() if scanner else "medium", VOL_REGIMES["medium"])
+    context = f"""你是美股日内交易助手(v3策略)。
 
 == Bot 状态: {state['bot_status']} ==
-扫描次数: {state['scan_count']} | 候选: {len(state['scan_results'])} | 已分析新闻: {len(state['news_results'])}
+扫描: {state['scan_count']}次 | 候选: {len(state['scan_results'])} | 新闻: {len(state['news_results'])}
 
 == 账户 ==
 总值: ${account.get('portfolio_value', 0):,.2f} | 现金: ${account.get('cash', 0):,.2f} | PDT: {pdt.remaining_trades()}/3
 
-== 持仓 ({len(positions)} 只) ==
+== 风控 ==
+regime: {scanner.get_vol_regime() if scanner else 'N/A'} | 仓位上限: {params['max_pos_pct']}% | 止损: {params['atr_mult']}x ATR
+
+== 持仓 ({len(positions)}) ==
 """
     for p in positions:
-        context += f"  {p['ticker']}: {p['qty']}股 | 入场${p['entry_price']:.2f} | 现价${p['current_price']:.2f} | PnL: ${p['unrealized_pnl']:.2f}\n"
-
-    context += f"\n== 最新扫描结果 (Top 10) ==\n"
+        context += f"  {p['ticker']}: {p['qty']}股 入场${p['entry_price']:.2f} 现${p['current_price']:.2f} PnL${p['unrealized_pnl']:.2f}\n"
+    context += f"\n== Top 10 候选 ==\n"
     for c in state["scan_results"][:10]:
         ns = state["news_results"].get(c["ticker"], {})
-        news_info = f"情绪{ns.get('sentiment_score', '-')}" if ns else "未分析"
-        context += f"  {c['ticker']}: ${c['price']:.2f} | 信号{c['signal_strength']} | {', '.join(c['signals'][:2])} | 新闻: {news_info}\n"
-
-    if state["recommendations"]:
-        context += f"\n== o3 最新推荐 ==\n"
-        for rec in state["recommendations"]:
-            context += f"  #{rec['rank']} {rec['ticker']} {rec['action']} | 入场${rec.get('entry_price',0):.2f} 止损${rec.get('stop_loss',0):.2f}\n"
-
-    context += f"\n== 最近活动日志 ==\n" + "\n".join(recent_logs[-10:])
-    context += f"\n\n== 风险参数 ==\n最大仓位{MAX_POSITION_PCT}% | 单笔亏损{MAX_SINGLE_LOSS_PCT}% | 日亏损{MAX_DAILY_LOSS_PCT}%\n"
+        context += f"  {c['ticker']}: ${c['price']:.2f} 信号{c['signal_strength']} 量比{c['volume_ratio']}x\n"
+    context += f"\n== 最近日志 ==\n" + "\n".join(recent_logs[-10:])
 
     state["chat_history"].append({"role": "user", "content": user_msg})
     messages = [{"role": "system", "content": context}] + state["chat_history"][-20:]
 
     try:
         model = request.json.get("model", MODEL_FAST)
-        if model.startswith("o") or model.startswith("gpt-5"):
-            response = openai_client.chat.completions.create(
-                model=model, messages=messages, max_completion_tokens=2000)
-        else:
-            response = openai_client.chat.completions.create(
-                model=model, messages=messages, temperature=0.3, max_completion_tokens=2000)
-
+        response = openai_client.chat.completions.create(
+            model=model, messages=messages,
+            temperature=0.3 if not model.startswith("o") else None,
+            max_completion_tokens=2000,
+        )
         reply = response.choices[0].message.content
         usage = response.usage
         state["chat_history"].append({"role": "assistant", "content": reply})
         return jsonify({
             "reply": reply, "model": model,
-            "tokens": {"prompt": usage.prompt_tokens if usage else 0,
-                       "completion": usage.completion_tokens if usage else 0,
-                       "total": usage.total_tokens if usage else 0},
+            "tokens": {
+                "prompt": usage.prompt_tokens if usage else 0,
+                "completion": usage.completion_tokens if usage else 0,
+            },
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/chat/clear", methods=["POST"])
 def api_chat_clear():
     state["chat_history"] = []
     return jsonify({"status": "cleared"})
 
-# ================================================================
-# 信号解释 (复用)
-# ================================================================
-def _explain_signals(candidate):
-    explanations = []
-    ind = candidate.get("indicators", {})
-    rsi = ind.get("rsi", 50)
-    if rsi <= RSI_OVERSOLD:
-        explanations.append({"signal":"RSI 超卖","value":f"{rsi}","threshold":f"≤{RSI_OVERSOLD}","measurement":"14日RSI","weight":30 if rsi<=20 else 20,"direction":"bullish","description":f"RSI={rsi} 超卖区间"})
-    elif rsi >= RSI_OVERBOUGHT:
-        explanations.append({"signal":"RSI 超买","value":f"{rsi}","threshold":f"≥{RSI_OVERBOUGHT}","measurement":"14日RSI","weight":30 if rsi>=80 else 20,"direction":"bearish","description":f"RSI={rsi} 超买区间"})
-    vr = candidate.get("volume_ratio", 0)
-    if vr >= VOLUME_SPIKE_RATIO:
-        explanations.append({"signal":"成交量放大","value":f"{vr:.1f}x","threshold":f"≥{VOLUME_SPIKE_RATIO}x","measurement":"今日推算量/20日均量","weight":25 if vr>=5 else 15,"direction":"neutral","description":f"量比 {vr:.1f}x"})
-    mc = ind.get("macd_cross","none")
-    if mc != "none":
-        explanations.append({"signal":f"MACD {'金叉' if mc=='golden' else '死叉'}","value":mc,"threshold":"MACD穿越信号线","measurement":"MACD(12,26,9)","weight":15,"direction":"bullish" if mc=="golden" else "bearish","description":f"MACD {'金叉看涨' if mc=='golden' else '死叉看跌'}"})
-    price = candidate.get("price",0)
-    if price >= ind.get("bb_upper",999999):
-        explanations.append({"signal":"突破布林上轨","value":f"${price:.2f}","threshold":"≥上轨","measurement":"布林带(20,2σ)","weight":10,"direction":"bearish","description":"突破上轨可能回归"})
-    elif price <= ind.get("bb_lower",0):
-        explanations.append({"signal":"跌破布林下轨","value":f"${price:.2f}","threshold":"≤下轨","measurement":"布林带(20,2σ)","weight":10,"direction":"bullish","description":"跌破下轨可能反弹"})
-    for sig in candidate.get("signals",[]):
-        if sig.startswith("gap_"):
-            p=sig.replace("gap_","").replace("%","")
-            explanations.append({"signal":"跳空","value":f"{p}%","threshold":f"≥{GAP_THRESHOLD_PCT}%","measurement":"开盘vs昨收","weight":10,"direction":"bullish" if float(p)>0 else "bearish","description":f"跳空{p}%"})
-        elif sig.startswith("momentum_"):
-            p=sig.replace("momentum_","").replace("%","")
-            explanations.append({"signal":"日内动量","value":f"{p}%","threshold":f"≥{INTRADAY_MOMENTUM_PCT}%","measurement":"现价vs今开","weight":8,"direction":"bullish" if float(p)>0 else "bearish","description":f"日内{p}%"})
-        elif sig.startswith("vwap_dev_"):
-            p=sig.replace("vwap_dev_","").replace("%","")
-            explanations.append({"signal":"VWAP偏离","value":f"{p}%","threshold":f"≥{VWAP_DEVIATION_PCT}%","measurement":"价格偏离VWAP","weight":8,"direction":"bullish" if float(p)>0 else "bearish","description":f"VWAP偏离{p}%"})
-    return explanations
 
 # ================================================================
 # 启动
@@ -689,9 +886,9 @@ def _explain_signals(candidate):
 if __name__ == "__main__":
     os.makedirs(LOG_DIR, exist_ok=True)
     print("=" * 55)
-    print("  📊 Trading Bot + Dashboard")
+    print("  📊 Trading Bot v3 + Dashboard")
     print(f"  🌐 http://localhost:5555")
-    print(f"  🤖 Bot 自动运行中 (后台线程)")
+    print(f"  🤖 策略: 全美股日内 | PDT 3次/周 | 只做多")
     print("=" * 55)
 
     bot_thread = threading.Thread(target=bot_loop, daemon=True)

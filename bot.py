@@ -18,8 +18,8 @@ from datetime import datetime, date
 from typing import List, Dict
 
 from config import (
-    ALPACA_API_KEY, OPENAI_API_KEY,
-    NEWS_SCAN_INTERVAL, FORCE_CLOSE_TIME, LOG_DIR,
+    ALPACA_API_KEY, OPENAI_API_KEY, LOG_DIR,
+    CLOSE_ALL, FINAL_CHECK,
 )
 from scanner import MarketScanner
 from news_analyzer import NewsAnalyzer
@@ -402,7 +402,7 @@ class TradingBot:
                     last_scan = time.time()
 
                 # 新闻轮询（每5分钟）
-                if time.time() - last_news >= NEWS_SCAN_INTERVAL:
+                if time.time() - last_news >= 3600:
                     self._check_news_updates()
                     last_news = time.time()
 
