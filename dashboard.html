@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Bot Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0e17;--surface:#111827;--surface2:#1a2235;--border:#1e293b;--text:#e2e8f0;--text2:#94a3b8;--accent:#3b82f6;--green:#10b981;--red:#ef4444;--yellow:#f59e0b;--purple:#8b5cf6}
+body{font-family:'SF Mono',Monaco,Consolas,monospace;background:var(--bg);color:var(--text);font-size:13px;overflow:hidden;height:100vh}
+.app{display:grid;grid-template-rows:48px 1fr;height:100vh}
+
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:20px}
+.topbar .logo{font-size:15px;font-weight:700;color:var(--accent);white-space:nowrap}
+.bot-badge{padding:3px 10px;border-radius:12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.bot-badge.running{background:rgba(16,185,129,.15);color:var(--green);animation:pulse 2s infinite}
+.bot-badge.scanning{background:rgba(59,130,246,.15);color:var(--accent);animation:pulse 1s infinite}
+.bot-badge.analyzing_news{background:rgba(139,92,246,.15);color:var(--purple);animation:pulse 1s infinite}
+.bot-badge.ranking{background:rgba(245,158,11,.15);color:var(--yellow);animation:pulse 1s infinite}
+.bot-badge.executing{background:rgba(239,68,68,.15);color:var(--red);animation:pulse .5s infinite}
+.bot-badge.market_open{background:rgba(16,185,129,.15);color:var(--green)}
+.bot-badge.premarket{background:rgba(245,158,11,.15);color:var(--yellow)}
+.bot-badge.after_hours{background:rgba(148,163,184,.15);color:var(--text2)}
+.bot-badge.sleeping{background:rgba(148,163,184,.1);color:var(--text2)}
+.bot-badge.initializing{background:rgba(59,130,246,.15);color:var(--accent);animation:pulse 1.5s infinite}
+.bot-badge.error{background:rgba(239,68,68,.15);color:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.stat{display:flex;flex-direction:column;align-items:center}
+.stat .label{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.stat .value{font-size:14px;font-weight:600}
+.stat .value.up{color:var(--green)}.stat .value.down{color:var(--red)}
+.topbar .meta{margin-left:auto;font-size:10px;color:var(--text2);text-align:right;line-height:1.5}
+
+.main{display:grid;grid-template-columns:1fr 380px;overflow:hidden}
+
+/* Left */
+.left{display:grid;grid-template-rows:auto auto 1fr;overflow:hidden;border-right:1px solid var(--border)}
+
+.positions-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:8px 16px;max-height:100px;overflow-y:auto}
+.positions-bar h3{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.pos-row{display:flex;gap:14px;align-items:center;padding:2px 0;font-size:12px}
+.pos-row .sym{font-weight:700;width:50px;color:var(--accent)}
+
+/* Activity Log */
+.activity-log{background:var(--surface);border-bottom:1px solid var(--border);max-height:160px;overflow-y:auto;padding:6px 16px}
+.activity-log::-webkit-scrollbar{width:4px}
+.activity-log::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.activity-log h3{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;position:sticky;top:0;background:var(--surface);padding:2px 0}
+.log-entry{font-size:11px;padding:1px 0;line-height:1.5;border-bottom:1px solid rgba(30,41,59,.3)}
+.log-entry .time{color:var(--text2);margin-right:6px;font-size:10px}
+.log-entry.error{color:var(--red)}
+.log-entry.warning{color:var(--yellow)}
+
+/* Tabs */
+.tab-area{display:flex;flex-direction:column;overflow:hidden}
+.tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+.tabs button{padding:8px 16px;border:none;background:none;color:var(--text2);cursor:pointer;font-size:12px;font-family:inherit;border-bottom:2px solid transparent;transition:all .15s}
+.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tabs button:hover{color:var(--text)}
+.tab-badge{background:var(--accent);color:white;font-size:10px;padding:1px 6px;border-radius:10px;margin-left:4px}
+.tab-content{flex:1;overflow-y:auto;padding:10px 16px}
+.tab-content::-webkit-scrollbar{width:5px}
+.tab-content::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* Cards */
+.stock-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden;transition:border-color .15s}
+.stock-card:hover{border-color:var(--accent)}
+.stock-card.expanded .card-details{display:block}
+.card-header{padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:12px}
+.card-header .ticker{font-weight:700;font-size:14px;width:55px;color:var(--accent)}
+.card-header .price{font-weight:600;width:70px}
+.strength{padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600}
+.strength.high{background:rgba(16,185,129,.15);color:var(--green)}
+.strength.mid{background:rgba(245,158,11,.15);color:var(--yellow)}
+.strength.low{background:rgba(148,163,184,.15);color:var(--text2)}
+.card-header .signals{flex:1;display:flex;gap:3px;flex-wrap:wrap}
+.signal-tag{padding:1px 5px;border-radius:3px;font-size:9px;background:var(--surface2);color:var(--text2)}
+.signal-tag.bullish{background:rgba(16,185,129,.1);color:var(--green)}
+.signal-tag.bearish{background:rgba(239,68,68,.1);color:var(--red)}
+.expand-btn{color:var(--text2);transition:transform .2s;font-size:10px}
+.stock-card.expanded .expand-btn{transform:rotate(180deg)}
+
+.card-details{display:none;border-top:1px solid var(--border)}
+.detail-section{padding:10px 12px;border-bottom:1px solid var(--border)}
+.detail-section:last-child{border-bottom:none}
+.detail-section h4{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+
+.signal-table{width:100%;border-collapse:collapse}
+.signal-table th{text-align:left;padding:3px 6px;font-size:9px;color:var(--text2);font-weight:500;text-transform:uppercase}
+.signal-table td{padding:4px 6px;font-size:11px;border-top:1px solid var(--border)}
+.weight-bar{display:inline-block;height:3px;border-radius:2px;background:var(--accent);vertical-align:middle;margin-left:3px}
+
+.ind-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.ind-item{background:var(--bg);padding:5px 6px;border-radius:4px;text-align:center}
+.ind-item .il{font-size:9px;color:var(--text2);text-transform:uppercase}
+.ind-item .iv{font-size:12px;font-weight:600;margin-top:1px}
+
+.news-item{background:var(--surface2);border-radius:6px;padding:8px 10px;margin-bottom:6px}
+.news-item .headline{font-weight:600;font-size:11px;line-height:1.4;margin-bottom:4px}
+.news-item .headline a{color:var(--text);text-decoration:none}
+.news-item .headline a:hover{color:var(--accent);text-decoration:underline}
+.news-item .meta{display:flex;gap:6px;align-items:center;font-size:10px;color:var(--text2);flex-wrap:wrap}
+.sentiment-badge{padding:1px 5px;border-radius:3px;font-size:9px;font-weight:600}
+.sentiment-badge.bullish{background:rgba(16,185,129,.15);color:var(--green)}
+.sentiment-badge.bearish{background:rgba(239,68,68,.15);color:var(--red)}
+.sentiment-badge.neutral{background:rgba(148,163,184,.15);color:var(--text2)}
+.news-item .analysis{margin-top:4px;padding:4px 6px;background:var(--bg);border-radius:3px;font-size:10px;color:var(--text2);line-height:1.5}
+
+/* Right - Chat */
+.right{display:flex;flex-direction:column;background:var(--surface);overflow:hidden}
+.chat-header{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.chat-header h3{font-size:13px;font-weight:600}
+.chat-header select{background:var(--surface2);color:var(--text);border:1px solid var(--border);padding:3px 6px;border-radius:4px;font-size:11px;font-family:inherit}
+.chat-messages{flex:1;overflow-y:auto;padding:10px 14px}
+.chat-messages::-webkit-scrollbar{width:5px}
+.chat-messages::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.chat-msg{margin-bottom:10px;max-width:95%}
+.chat-msg.user{margin-left:auto}
+.chat-msg.user .bubble{background:var(--accent);color:white;border-radius:10px 10px 3px 10px}
+.chat-msg.assistant .bubble{background:var(--surface2);border-radius:10px 10px 10px 3px}
+.bubble{padding:8px 11px;font-size:12px;line-height:1.6;word-wrap:break-word;white-space:pre-wrap}
+.chat-msg .cmeta{font-size:9px;color:var(--text2);margin-top:2px}
+.chat-msg.user .cmeta{text-align:right}
+.chat-input{padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:6px}
+.chat-input input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-size:12px;font-family:inherit;outline:none}
+.chat-input input:focus{border-color:var(--accent)}
+.chat-input button{padding:7px 14px;background:var(--accent);border:none;border-radius:8px;color:white;cursor:pointer;font-size:12px;font-family:inherit}
+.chat-input button:disabled{opacity:.4;cursor:not-allowed}
+.quick-btns{padding:3px 14px 6px;display:flex;gap:3px;flex-wrap:wrap}
+.quick-btns button{padding:2px 7px;border:1px solid var(--border);border-radius:4px;background:none;color:var(--text2);cursor:pointer;font-size:10px;font-family:inherit}
+.quick-btns button:hover{border-color:var(--accent);color:var(--accent)}
+
+.rec-card{background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);border-radius:6px;padding:8px 10px;margin-bottom:6px}
+.rec-card .rec-ticker{font-weight:700;color:var(--accent);font-size:14px}
+.rec-card .rec-details{font-size:11px;color:var(--text2);margin-top:3px;line-height:1.6}
+
+.empty-state{text-align:center;padding:30px 20px;color:var(--text2)}
+.empty-state .icon{font-size:28px;margin-bottom:8px}
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="app">
+
+<div class="topbar">
+  <div class="logo">TRADING BOT</div>
+  <span class="bot-badge initializing" id="botBadge">INITIALIZING</span>
+  <div class="stat"><span class="label">总值</span><span class="value" id="tv">--</span></div>
+  <div class="stat"><span class="label">现金</span><span class="value" id="tc">--</span></div>
+  <div class="stat"><span class="label">PDT</span><span class="value" id="pdt">-/3</span></div>
+  <div class="stat"><span class="label">扫描</span><span class="value" id="scanN">0</span></div>
+  <div class="stat"><span class="label">候选</span><span class="value" id="candN">0</span></div>
+  <div class="stat"><span class="label">交易</span><span class="value" id="tradeN">0</span></div>
+  <div class="meta" id="metaInfo">启动中...</div>
+</div>
+
+<div class="main">
+<div class="left">
+
+  <div class="positions-bar">
+    <h3>持仓</h3>
+    <div id="positions"><span style="color:var(--text2)">加载中...</span></div>
+  </div>
+
+  <div class="activity-log" id="activityLog">
+    <h3>活动日志 (自动)</h3>
+    <div id="logEntries"><div class="log-entry"><span class="time">--:--:--</span>等待 Bot 启动...</div></div>
+  </div>
+
+  <div class="tab-area">
+    <div class="tabs">
+      <button class="active" onclick="switchTab('scanner',this)">扫描结果 <span class="tab-badge" id="scanCount">0</span></button>
+      <button onclick="switchTab('recs',this)">AI 推荐 <span class="tab-badge" id="recCount">0</span></button>
+      <button onclick="switchTab('allnews',this)">新闻 <span class="tab-badge" id="newsCount">0</span></button>
+    </div>
+    <div class="tab-content" id="tab-scanner">
+      <div class="empty-state" id="scanEmpty"><div class="icon">📡</div><p>Bot 正在自动扫描全市场...</p></div>
+      <div id="scanResults"></div>
+    </div>
+    <div class="tab-content" id="tab-recs" style="display:none">
+      <div class="empty-state" id="recEmpty"><div class="icon">🎯</div><p>等待 o3 深度排名生成推荐...</p></div>
+      <div id="recResults"></div>
+    </div>
+    <div class="tab-content" id="tab-allnews" style="display:none">
+      <div class="empty-state" id="newsEmpty"><div class="icon">📰</div><p>Bot 正在自动分析新闻...</p></div>
+      <div id="allNewsResults"></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="right">
+  <div class="chat-header">
+    <h3>AI 助手</h3>
+    <select id="chatModel">
+      <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+      <option value="gpt-5.4">gpt-5.4</option>
+      <option value="o3">o3</option>
+    </select>
+  </div>
+  <div class="chat-messages" id="chatMessages">
+    <div class="chat-msg assistant"><div class="bubble">你好！Bot 正在自动运行。我能看到实时的账户、持仓、扫描结果和新闻分析。
+
+有什么想了解的？</div></div>
+  </div>
+  <div class="quick-btns">
+    <button onclick="quickChat('今天有什么好机会？')">今日机会</button>
+    <button onclick="quickChat('分析当前持仓风险')">持仓风险</button>
+    <button onclick="quickChat('油价对哪些股票影响最大？')">油价影响</button>
+    <button onclick="quickChat('本周子弹怎么分配？')">子弹分配</button>
+    <button onclick="quickChat('总结今天所有新闻和信号')">今日总结</button>
+    <button onclick="quickChat('解释当前排名第一的推荐')">解释推荐</button>
+  </div>
+  <div class="chat-input">
+    <input id="chatInput" placeholder="问任何问题..." onkeydown="if(event.key==='Enter')sendChat()">
+    <button id="chatSendBtn" onclick="sendChat()">发送</button>
+  </div>
+</div>
+
+</div></div>
+
+<script>
+const API = '';
+const STATUS_LABELS = {
+  initializing: '启动中', running: '运行中', scanning: '扫描中',
+  analyzing_news: '分析新闻', ranking: 'o3 排名', executing: '执行交易',
+  market_open: '盘中监控', premarket: '盘前', after_hours: '盘后',
+  sleeping: '休眠', error: '错误',
+};
+
+// ================================================================
+// 自动刷新
+// ================================================================
+async function refresh() {
+  try {
+    const [acctRes, stateRes, scanRes] = await Promise.all([
+      fetch(`${API}/api/account`).then(r=>r.json()),
+      fetch(`${API}/api/state`).then(r=>r.json()),
+      fetch(`${API}/api/scan/results`).then(r=>r.json()),
+    ]);
+
+    // Account
+    if (!acctRes.error) {
+      const a = acctRes.account;
+      document.getElementById('tv').textContent = '$' + a.portfolio_value.toLocaleString('en-US',{minimumFractionDigits:2});
+      document.getElementById('tc').textContent = '$' + a.cash.toLocaleString('en-US',{minimumFractionDigits:2});
+      document.getElementById('pdt').textContent = acctRes.pdt_remaining + '/3';
+      renderPositions(acctRes.positions);
+    }
+
+    // Bot State
+    const badge = document.getElementById('botBadge');
+    badge.className = 'bot-badge ' + stateRes.bot_status;
+    badge.textContent = STATUS_LABELS[stateRes.bot_status] || stateRes.bot_status;
+    document.getElementById('scanN').textContent = stateRes.scan_count;
+    document.getElementById('candN').textContent = stateRes.candidates_count;
+    document.getElementById('tradeN').textContent = stateRes.today_trades.length;
+
+    const lastScan = stateRes.last_scan_time ? new Date(stateRes.last_scan_time).toLocaleTimeString('zh-CN') : '--';
+    document.getElementById('metaInfo').innerHTML = `上次扫描 ${lastScan}<br>已分析 ${stateRes.news_analyzed_count} 只新闻`;
+
+    // Activity Log
+    renderLog(stateRes.activity_log);
+
+    // Recommendations
+    renderRecommendations(stateRes.recommendations);
+    document.getElementById('recCount').textContent = stateRes.recommendations.length;
+
+    // Scan Results
+    if (scanRes.results && scanRes.results.length > 0) {
+      renderScanResults(scanRes.results);
+      document.getElementById('scanCount').textContent = scanRes.count;
+    }
+
+    // News
+    renderAllNews(scanRes.results || []);
+
+  } catch(e) {
+    console.error('refresh error:', e);
+  }
+}
+
+function renderPositions(positions) {
+  const div = document.getElementById('positions');
+  const filtered = positions.filter(p => p.ticker !== 'SGOV');
+  if (filtered.length === 0) {
+    div.innerHTML = '<span style="color:var(--text2)">无活跃持仓 (SGOV 除外)</span>';
+    return;
+  }
+  div.innerHTML = filtered.map(p => {
+    const pnl = p.unrealized_pnl || 0;
+    const pnlPct = p.unrealized_pnl_pct || 0;
+    const cls = pnl >= 0 ? 'up' : 'down';
+    const sign = pnl >= 0 ? '+' : '';
+    return `<div class="pos-row">
+      <span class="sym">${p.ticker}</span>
+      <span>${p.qty}股</span>
+      <span>$${parseFloat(p.entry_price).toFixed(2)}</span>
+      <span>→ $${parseFloat(p.current_price).toFixed(2)}</span>
+      <span style="color:var(--${cls});font-weight:600">${sign}$${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)</span>
+    </div>`;
+  }).join('');
+}
+
+function renderLog(logs) {
+  const container = document.getElementById('logEntries');
+  container.innerHTML = logs.map(l => {
+    const cls = l.level === 'error' ? 'error' : l.level === 'warning' ? 'warning' : '';
+    return `<div class="log-entry ${cls}"><span class="time">${l.time}</span>${l.msg}</div>`;
+  }).join('');
+  const logBox = document.getElementById('activityLog');
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+function renderRecommendations(recs) {
+  const container = document.getElementById('recResults');
+  document.getElementById('recEmpty').style.display = recs.length ? 'none' : 'block';
+  container.innerHTML = recs.map(r => `<div class="rec-card">
+    <span class="rec-ticker">#${r.rank} ${r.ticker}</span>
+    <span class="sentiment-badge ${r.action==='BUY'?'bullish':'bearish'}">${r.action}</span>
+    <span style="font-size:11px;margin-left:6px">置信度 ${r.confidence || 0}%</span>
+    <div class="rec-details">
+      入场 $${(r.entry_price||0).toFixed(2)} | 止损 $${(r.stop_loss||0).toFixed(2)} | 止盈 $${(r.take_profit||0).toFixed(2)}<br>
+      仓位 ${r.position_size_pct||0}% | 风险回报比 ${(r.risk_reward_ratio||0).toFixed(1)} | 时间窗口 ${r.time_window||'-'}
+      ${r.reasoning ? '<br>'+r.reasoning : ''}
+    </div>
+  </div>`).join('');
+}
+
+function renderScanResults(results) {
+  const container = document.getElementById('scanResults');
+  document.getElementById('scanEmpty').style.display = results.length ? 'none' : 'block';
+  container.innerHTML = results.map(r => {
+    const sc = r.signal_strength >= 30 ? 'high' : r.signal_strength >= 15 ? 'mid' : 'low';
+    const tags = r.signals.map(s => {
+      const d = s.match(/(oversold|below|support|golden|gap_\+|momentum_\+)/) ? 'bullish' : s.match(/(overbought|above|resistance|death|gap_-|momentum_-)/) ? 'bearish' : '';
+      return `<span class="signal-tag ${d}">${s}</span>`;
+    }).join('');
+    const details = r.signal_details || [];
+    const rows = details.map(d => `<tr>
+      <td><span class="signal-tag ${d.direction}">${d.signal}</span></td>
+      <td>${d.value}</td><td style="color:var(--text2);font-size:10px">${d.measurement}</td>
+      <td style="color:var(--text2)">${d.threshold}</td>
+      <td><b>${d.weight}</b><span class="weight-bar" style="width:${d.weight}px"></span></td>
+      <td style="font-size:10px;color:var(--text2)">${d.description}</td></tr>`).join('');
+    const ind = r.indicators;
+    const newsHtml = r.news ? renderNewsInline(r.news) : '<span style="color:var(--text2)">等待 Bot 自动分析...</span>';
+    const combined = r.combined_score ? `<span style="color:var(--yellow);font-size:10px;margin-left:4px">综合${r.combined_score}</span>` : '';
+
+    return `<div class="stock-card" id="card-${r.ticker}">
+      <div class="card-header" onclick="toggleCard('${r.ticker}')">
+        <span class="ticker">${r.ticker}</span>
+        <span class="price">$${r.price.toFixed(2)}</span>
+        <span class="strength ${sc}">${r.signal_strength}</span>
+        <span style="color:var(--text2);font-size:10px">${r.volume_ratio.toFixed(1)}x</span>
+        ${combined}
+        <span class="signals">${tags}</span>
+        <span class="expand-btn">▼</span>
+      </div>
+      <div class="card-details">
+        <div class="detail-section"><h4>技术指标</h4>
+          <div class="ind-grid">
+            <div class="ind-item"><div class="il">RSI</div><div class="iv" style="color:${ind.rsi<=30?'var(--green)':ind.rsi>=70?'var(--red)':'var(--text)'}">${ind.rsi}</div></div>
+            <div class="ind-item"><div class="il">MACD</div><div class="iv" style="color:${ind.macd_hist>0?'var(--green)':'var(--red)'}">${ind.macd_hist>0?'+':''}${ind.macd_hist}</div></div>
+            <div class="ind-item"><div class="il">ATR</div><div class="iv">${ind.atr}</div></div>
+            <div class="ind-item"><div class="il">BB上</div><div class="iv">$${ind.bb_upper}</div></div>
+            <div class="ind-item"><div class="il">BB中</div><div class="iv">$${ind.bb_middle}</div></div>
+            <div class="ind-item"><div class="il">BB下</div><div class="iv">$${ind.bb_lower}</div></div>
+            <div class="ind-item"><div class="il">支撑</div><div class="iv">$${ind.support}</div></div>
+            <div class="ind-item"><div class="il">阻力</div><div class="iv">$${ind.resistance}</div></div>
+            <div class="ind-item"><div class="il">均量</div><div class="iv">${(ind.avg_volume_20/1000).toFixed(0)}K</div></div>
+          </div>
+        </div>
+        ${rows.length ? `<div class="detail-section"><h4>信号详解 & 权重</h4>
+          <table class="signal-table"><tr><th>信号</th><th>值</th><th>指标</th><th>阈值</th><th>权重</th><th>解读</th></tr>${rows}</table></div>` : ''}
+        <div class="detail-section"><h4>新闻分析</h4><div id="news-${r.ticker}">${newsHtml}</div></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderNewsInline(data) {
+  if (!data || !data.has_news || !data.analyses || data.analyses.length === 0) return '<span style="color:var(--text2)">暂无新闻</span>';
+  const sc = data.sentiment_score > 0 ? 'var(--green)' : data.sentiment_score < 0 ? 'var(--red)' : 'var(--text2)';
+  let h = `<div style="margin-bottom:6px;font-size:11px">情绪 <b style="color:${sc}">${data.sentiment_score>0?'+':''}${data.sentiment_score}</b> | ${data.news_count}条 | 涨<b style="color:var(--green)">${data.bullish_count||0}</b> 跌<b style="color:var(--red)">${data.bearish_count||0}</b> 中<b>${data.neutral_count||0}</b></div>`;
+  for (const a of data.analyses) {
+    const s = a.sentiment==='bullish'?'bullish':a.sentiment==='bearish'?'bearish':'neutral';
+    const l = a.sentiment==='bullish'?'看涨':a.sentiment==='bearish'?'看跌':'中性';
+    h += `<div class="news-item">
+      <div class="headline">${a.headline || a.summary || '(无标题)'}</div>
+      <div class="meta"><span class="sentiment-badge ${s}">${l}</span><span>置信${a.confidence||0}%</span><span>严重度${a.intraday_severity||0}/10</span><span>${a.catalyst_type||'-'}</span>${a.expected_move_pct?`<span>波动${a.expected_move_pct}%</span>`:''}<span>${a.model||''}</span></div>
+      ${a.summary?`<div class="analysis">${a.summary}</div>`:''}
+    </div>`;
+  }
+  return h;
+}
+
+function renderAllNews(results) {
+  const container = document.getElementById('allNewsResults');
+  const withNews = results.filter(r => r.news && r.news.has_news);
+  document.getElementById('newsEmpty').style.display = withNews.length ? 'none' : 'block';
+  document.getElementById('newsCount').textContent = withNews.length;
+  container.innerHTML = withNews.map(r => `<div style="margin-bottom:14px">
+    <h4 style="color:var(--accent);margin-bottom:4px;font-size:12px">${r.ticker} <span style="color:var(--text2);font-size:10px">$${r.price.toFixed(2)}</span></h4>
+    ${renderNewsInline(r.news)}
+  </div>`).join('');
+}
+
+function toggleCard(ticker) { document.getElementById('card-'+ticker).classList.toggle('expanded'); }
+function switchTab(tab, btn) {
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.tab-content').forEach(t=>t.style.display='none');
+  document.getElementById('tab-'+tab).style.display='block';
+}
+
+// Chat
+let chatSending = false;
+function quickChat(msg) { document.getElementById('chatInput').value=msg; sendChat(); }
+async function sendChat() {
+  if(chatSending)return;
+  const input=document.getElementById('chatInput');
+  const msg=input.value.trim();
+  if(!msg)return;
+  input.value='';
+  chatSending=true;
+  document.getElementById('chatSendBtn').disabled=true;
+  appendChat('user',msg);
+  const lid=appendChat('assistant','<span class="spinner"></span> 思考中...');
+  try {
+    const r=await fetch(`${API}/api/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,model:document.getElementById('chatModel').value})});
+    const d=await r.json();
+    if(d.error)throw new Error(d.error);
+    updateChat(lid,d.reply,`${d.model} | ${d.tokens.total} tokens`);
+  } catch(e) { updateChat(lid,'错误: '+e.message,''); }
+  chatSending=false;
+  document.getElementById('chatSendBtn').disabled=false;
+}
+function appendChat(role,content) {
+  const c=document.getElementById('chatMessages');
+  const id='m'+Date.now();
+  const d=document.createElement('div');
+  d.className='chat-msg '+role;d.id=id;
+  d.innerHTML=`<div class="bubble">${content}</div>`;
+  c.appendChild(d);c.scrollTop=c.scrollHeight;return id;
+}
+function updateChat(id,content,meta) {
+  const el=document.getElementById(id);
+  if(el){
+    const esc=document.createElement('div');esc.textContent=content;
+    el.innerHTML=`<div class="bubble">${esc.innerHTML.replace(/\n/g,'<br>')}</div>${meta?`<div class="cmeta">${meta}</div>`:''}`;
+    document.getElementById('chatMessages').scrollTop=9999999;
+  }
+}
+
+// Init
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
