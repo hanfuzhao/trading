@@ -1,5 +1,5 @@
 """
-配置文件 v3 — 全美股日内交易 | 2026年4-8月 | PDT 3次/周
+配置文件 v6 — 70%隔夜均值回归 + 30%日内 | 3变量Regime | IBS+RSI(2)<15
 """
 import os
 from dotenv import load_dotenv
@@ -11,86 +11,96 @@ ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
 ALPACA_API_SECRET = os.getenv("ALPACA_API_SECRET")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
+ALPACA_WS_URL = "wss://stream.data.alpaca.markets/v2/iex"
+
+# === 资金 ===
+MAX_CAPITAL = float(os.getenv("MAX_CAPITAL", "0"))
+LONG_ONLY = True
 
 # === 股票池过滤 ===
-MIN_STOCK_PRICE = float(os.getenv("MIN_STOCK_PRICE", "5"))
-MIN_AVG_VOLUME = int(os.getenv("MIN_AVG_VOLUME", "500000"))
+MIN_STOCK_PRICE = 10         # v6: $10
+MIN_AVG_VOLUME = 1_000_000   # v6: 1M
 
-# === 资金上限（模拟小账户） ===
-MAX_CAPITAL = float(os.getenv("MAX_CAPITAL", "0"))  # 0=不限制
+# === 隔夜策略阈值 ===
+RSI_2_THRESHOLD = 15         # RSI(2) < 15 (v6: 从<10放宽)
+RSI_2_EXTREME = 5            # RSI(2) < 5 优先级最高
+IBS_THRESHOLD = 0.25         # IBS < 0.25
+CONSECUTIVE_DOWN_BONUS = 3   # 连续下跌≥3天加分
+MAX_OVERNIGHT_POSITIONS = 3  # 每晚最多3只
 
-# === 交易方向 ===
-LONG_ONLY = True  # 只做多，不做空
+# === 日内策略阈值 ===
+INTRADAY_DROP_PCT = 1.5      # 日内跌幅>1.5%触发均值回归信号
+INTRADAY_VOL_RATIO = 1.5     # 量比>1.5确认
 
-# === 动量类信号阈值 ===
-GAP_THRESHOLD_PCT = 2.0
-VOLUME_SPIKE_RATIO = 2.0
-RSI_OVERBOUGHT = 70
-RSI_OVERBOUGHT_EXTREME = 80
-MACD_CROSS_SCORE = 15
-BB_UPPER_SCORE = 10
-RESISTANCE_BREAK_SCORE = 10
-VWAP_DEVIATION_PCT = 1.5
-INTRADAY_MOMENTUM_PCT = 1.5
-
-# === 均值回归信号阈值 ===
-RSI_2_OVERSOLD = 10
-RSI_2_EXTREME = 5
-RSI_14_OVERSOLD = 30
-RSI_14_OVERSOLD_EXTREME = 20
-WILLIAMS_R_OVERSOLD = -90
-CONSECUTIVE_DOWN_DAYS = 3
-
-# === 波动率 Regime 参数 ===
-# {regime: (risk_pct, max_position_pct, atr_stop_mult)}
-VOL_REGIMES = {
-    "low":     {"risk_pct": 1.5, "max_pos_pct": 15, "atr_mult": 1.5},
-    "medium":  {"risk_pct": 1.1, "max_pos_pct": 12, "atr_mult": 2.0},
-    "high":    {"risk_pct": 0.75, "max_pos_pct": 8,  "atr_mult": 2.5},
-    "extreme": {"risk_pct": 0.4,  "max_pos_pct": 5,  "atr_mult": 3.0},
+# === 3变量Regime矩阵 ===
+# {regime: {overnight params, intraday params}}
+REGIME_PARAMS = {
+    "bullish": {
+        "on_risk_pct": 1.0,  "on_max_pos_pct": 5,  "on_total_pct": 15,
+        "id_risk_pct": 1.0,  "id_max_pos_pct": 10, "id_total_pct": 10, "id_atr_mult": 2.0,
+    },
+    "cautious": {
+        "on_risk_pct": 0.75, "on_max_pos_pct": 4,  "on_total_pct": 12,
+        "id_risk_pct": 1.0,  "id_max_pos_pct": 10, "id_total_pct": 10, "id_atr_mult": 2.0,
+    },
+    "defensive": {
+        "on_risk_pct": 0.5,  "on_max_pos_pct": 3,  "on_total_pct": 8,
+        "id_risk_pct": 0.5,  "id_max_pos_pct": 5,  "id_total_pct": 5,  "id_atr_mult": 2.5,
+    },
+    "crisis": {
+        "on_risk_pct": 0.25, "on_max_pos_pct": 2,  "on_total_pct": 5,
+        "id_risk_pct": 0.5,  "id_max_pos_pct": 5,  "id_total_pct": 5,  "id_atr_mult": 2.5,
+    },
 }
 
 # === 风险管理 ===
-MAX_CONCURRENT_POSITIONS = 2
-MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "3"))
+MAX_CONCURRENT_POSITIONS = 5
+MAX_SAME_SECTOR_OVERNIGHT = 2
+MAX_DAILY_LOSS_PCT = 2.0     # v6: 2% (从3%降低)
 MAX_WEEKLY_LOSS_PCT = 5.0
-CONSECUTIVE_LOSS_COOLDOWN = 3        # 连输N笔暂停
-COOLDOWN_HOURS = 2                   # 暂停时长
-CONSECUTIVE_WEEK_LOSS_PAUSE = 2      # 连续N周亏损暂停
+CONSECUTIVE_LOSS_COOLDOWN = 3
+COOLDOWN_HOURS = 2
+CATASTROPHIC_STOP_PCT = 5.0  # 盘前极端缺口止损线
 
-# === 入场时间窗口（美东时间） ===
-ENTRY_WINDOW_1_START = "09:45"
-ENTRY_WINDOW_1_END = "10:15"
-ENTRY_WINDOW_2_START = "15:00"
-ENTRY_WINDOW_2_END = "15:30"
-BLACKOUT_OPEN_END = "09:45"          # 开盘波动期
-MIDDAY_DEAD_START = "11:30"
+# === 评分权重 ===
+ON_TECH_W = 0.65
+ON_MACRO_W = 0.25
+ON_NEWS_W = 0.10
+ID_TECH_W = 0.55
+ID_MACRO_W = 0.25
+ID_NEWS_W = 0.10
+ID_VOL_W = 0.10
+
+# === 时间窗口（美东时间）===
+OVERNIGHT_SCAN_START = "15:00"
+OVERNIGHT_SCAN_END = "15:30"
+OVERNIGHT_ENTRY_START = "15:30"
+OVERNIGHT_ENTRY_END = "15:45"
+OVERNIGHT_EXIT_START = "09:45"
+OVERNIGHT_EXIT_END = "10:15"
+INTRADAY_ENTRY_START = "14:00"
+INTRADAY_ENTRY_END = "14:45"
+INTRADAY_EXIT_LIMIT = "15:40"
+INTRADAY_EXIT_MARKET = "15:48"
+INTRADAY_CONFIRM_ZERO = "15:50"
+MIDDAY_DEAD_START = "12:00"
 MIDDAY_DEAD_END = "13:30"
-NO_NEW_POSITION_AFTER = "15:30"
 
 # === 执行参数 ===
-ENTRY_TIMEOUT_SECONDS = 120          # Limit Order 120秒未成交取消
-LIMIT_OFFSET = 0.03                  # 入场Limit比现价差$0.03
-TIME_STOP_MINUTES = 25               # 持仓25分钟盈利不足0.5R平仓
-
-# === 尾盘强制平仓时间表 ===
-STOP_NEW_POSITIONS = "15:30"
-CLOSE_PROFITABLE = "15:45"
-CLOSE_ALL = "15:48"
-FINAL_CHECK = "15:50"
-
-# === 分批止盈 ===
-PARTIAL_EXIT_R = 1.0                 # 到达1R平50%
-PARTIAL_EXIT_PCT = 0.5               # 平仓比例
-TRAILING_ATR_MULT = 1.5              # trailing stop用1.5x ATR
+ENTRY_TIMEOUT_SECONDS = 120
+TIME_STOP_MINUTES = 25
+PARTIAL_EXIT_R = 1.0
+PARTIAL_EXIT_PCT = 0.5
+TRAILING_ATR_MULT = 1.5
 
 # === PDT ===
 PDT_MAX_DAY_TRADES = 3
 PDT_WINDOW_DAYS = 5
-MONDAY_MIN_SCORE = 95                # 周一入场最低分数
+MONDAY_EXCEPTION_SCORE = 85  # v6: 85 (从95降低)
 
 # === OpenAI 模型 ===
 MODEL_FAST = "gpt-4.1-mini"
+MODEL_SENTIMENT = "gpt-4.1-mini"  # v6: 情绪分类用mini(No-CoT)
 MODEL_DEEP = "gpt-5.4"
 MODEL_RANK = "o3"
 MAX_O3_CALLS_PER_DAY = 3
