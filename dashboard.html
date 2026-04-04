@@ -121,6 +121,8 @@ body{font-family:'SF Mono',Monaco,Consolas,monospace;background:var(--bg);color:
 .bubble{padding:8px 11px;font-size:12px;line-height:1.6;word-wrap:break-word;white-space:pre-wrap}
 .chat-msg .cmeta{font-size:9px;color:var(--text2);margin-top:2px}
 .chat-msg.user .cmeta{text-align:right}
+.tool-calls{margin-top:4px;padding:4px 6px;background:var(--bg);border-radius:4px;font-size:10px;color:var(--text2);line-height:1.6}
+.tool-calls .tc{display:inline-block;padding:1px 5px;background:rgba(139,92,246,.15);color:var(--purple);border-radius:3px;margin:1px 2px;font-size:9px}
 .chat-input{padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:6px}
 .chat-input input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-size:12px;font-family:inherit;outline:none}
 .chat-input input:focus{border-color:var(--accent)}
@@ -432,7 +434,13 @@ async function sendChat() {
     const r=await fetch(`${API}/api/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,model:document.getElementById('chatModel').value})});
     const d=await r.json();
     if(d.error)throw new Error(d.error);
-    updateChat(lid,d.reply,`${d.model} | ${d.tokens.total} tokens`);
+    let meta = `${d.model} | ${d.tokens.total} tokens`;
+    if(d.agent && d.agent.tool_calls && d.agent.tool_calls.length>0){
+      meta += ` | ${d.agent.iterations} iterations`;
+      const tools = d.agent.tool_calls.map(t=>`<span class="tc">${t.tool}(${Object.values(t.args).join(',')}) ${t.latency_ms}ms</span>`).join('');
+      meta = `<div class="tool-calls">Tools: ${tools}</div>` + meta;
+    }
+    updateChat(lid,d.reply,meta);
   } catch(e) { updateChat(lid,'错误: '+e.message,''); }
   chatSending=false;
   document.getElementById('chatSendBtn').disabled=false;

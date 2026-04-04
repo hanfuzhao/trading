@@ -1,144 +1,169 @@
-# 全美股日内交易Bot 🦙
+# AI Trading Agent
 
-OpenAI + Alpaca | PDT限制下的精选交易系统
+An LLM-based autonomous trading agent for the US stock market, built with a custom ReAct loop (no LangChain/CrewAI). Uses OpenAI models + Alpaca brokerage API to analyze markets, evaluate news, manage risk, and execute trades.
 
-## 你需要做什么
+## Architecture
 
-### 1. 安装依赖
-```bash
-pip install -r requirements.txt
+```
+User ──▶ Dashboard UI ──▶ /api/chat ──▶ Agent Loop ──▶ LLM (plan)
+                                            │              │
+                                            │         tool_calls?
+                                            │              │ yes
+                                            │              ▼
+                                            │       Tool Registry
+                                            │       ┌─────────────┐
+                                            │       │ 7 Tools:    │
+                                            │       │  Market Data│──▶ Alpaca Data API
+                                            │       │  News       │──▶ Alpaca News + OpenAI
+                                            │       │  Scan O/N   │──▶ Scanner (RSI/IBS)
+                                            │       │  Scan Intra │──▶ Scanner (reversal)
+                                            │       │  Portfolio  │──▶ Alpaca Trading API
+                                            │       │  Macro Env  │──▶ SPY/VIX/USO data
+                                            │       │  Execute    │──▶ Order Execution
+                                            │       └─────────────┘
+                                            │              │
+                                            │         result back
+                                            │              │
+                                            ◀──────── LLM (reason) ──▶ Final Answer
 ```
 
-### 2. 配置API Key
+The agent loop (`agent.py`) is written from scratch:
+1. User sends a message
+2. LLM receives message + tool definitions (OpenAI function-calling format)
+3. LLM either returns a text answer (done) or requests tool calls
+4. If tool calls → execute via `ToolRegistry`, feed results back to LLM
+5. Repeat until final answer or max 10 iterations
+
+## Tools (7 total)
+
+| # | Tool | Description | Data Source |
+|---|------|-------------|-------------|
+| 1 | `get_stock_data` | Price, RSI(2), RSI(14), IBS, NATR, ATR, MACD, Bollinger Bands | Alpaca Market Data API |
+| 2 | `search_news` | Fetch + AI sentiment analysis, structural risk veto | Alpaca News API + OpenAI |
+| 3 | `scan_overnight` | Full-market scan: RSI(2)<15 AND IBS<0.25, sorted by NATR | Alpaca Snapshots + `ta` library |
+| 4 | `scan_intraday` | Afternoon reversal scan: stocks down >1.5% with high volume | Alpaca Snapshots |
+| 5 | `get_portfolio` | Account value, positions, P&L, PDT status, risk status | Alpaca Trading API |
+| 6 | `get_macro_environment` | 3-variable Regime matrix, VIX/VIX3M, SPY/200SMA, Man Group 7-var | Alpaca (SPY, VIXY, USO, TLT, etc.) |
+| 7 | `execute_trade` | Submit buy/sell orders with risk validation | Alpaca Trading API |
+
+## Trading Strategy
+
+- **Overnight Mean Reversion** (70%, no PDT cost): Buy oversold stocks at 15:30, sell next morning at 09:45-10:15
+- **Intraday Afternoon Reversal** (30%, uses PDT): Buy at 14:00-14:45, exit by 15:40
+- **3-Variable Regime**: VIX/VIX3M ratio + SPY vs 200-day SMA + VIX absolute level
+- **Risk**: 2% daily loss limit, max 5 positions, max 2 same-sector overnight
+
+## Evaluation
+
+Run the evaluation suite (20 test cases across 5 categories):
+
 ```bash
-cp .env.example .env
+python evaluation.py          # full suite
+python evaluation.py --quick  # 5 key tests
 ```
-编辑 `.env` 文件，填入你的3个Key：
-- `ALPACA_API_KEY` — Alpaca Paper Trading的Key
-- `ALPACA_API_SECRET` — Alpaca Paper Trading的Secret
-- `OPENAI_API_KEY` — OpenAI API Key
 
-**永远不要把Key分享给任何人或上传到GitHub。**
+### Metrics Measured
 
-### 3. 运行
+| Metric | Description |
+|--------|-------------|
+| Tool Selection Accuracy | % of expected tools correctly called |
+| Keyword Coverage | % of expected keywords present in response |
+| Safety Compliance | % of unsafe requests correctly refused |
+| LLM-as-Judge Score | GPT-4.1-mini rates response quality 1-5 |
+| Task Completion Rate | % of queries scoring ≥ 3/5 |
+| Avg Iterations | Agent loop iterations per query |
+| Avg Latency | Response time in ms |
+| Avg Tokens | Token usage per query |
+
+### Test Categories
+
+1. **Information Retrieval** (5 tests): Stock prices, portfolio status, PDT slots
+2. **Analysis** (5 tests): Market scanning, multi-stock comparison, macro assessment
+3. **Trading** (3 tests): Order execution with risk checks
+4. **Safety** (3 tests): Oversized orders, short selling, PDT abuse
+5. **Complex Multi-tool** (4 tests): Full briefings, multi-factor analysis
+
+## Setup
+
+### Prerequisites
+
+- Python 3.10+
+- Alpaca Paper Trading account ([sign up](https://app.alpaca.markets))
+- OpenAI API key ([get one](https://platform.openai.com/api-keys))
+
+### Installation
 
 ```bash
-# 查看账户状态
+git clone https://github.com/hanfuzhao/trading.git
+cd trading
+pip install flask openai alpaca-py ta python-dotenv websocket-client
+```
+
+### Configuration
+
+Create a `.env` file:
+
+```env
+ALPACA_API_KEY=your_alpaca_key
+ALPACA_API_SECRET=your_alpaca_secret
+OPENAI_API_KEY=your_openai_key
+```
+
+### Running
+
+```bash
+# Start the dashboard (includes autonomous bot + agent chat)
+python dashboard_server.py
+
+# Open in browser
+open http://localhost:5555
+
+# Run evaluation
+python evaluation.py
+
+# Check account status (CLI)
 python bot.py --status
-
-# 只扫描不交易（看看今天有什么异动）
-python bot.py --scan-only
-
-# 完整流程但不下单（测试所有分析逻辑）
-python bot.py --dry-run
-
-# 正式运行（Paper Trading模拟盘）
-python bot.py
 ```
 
-## 系统架构
-
-```
-全市场4000+只 → 技术扫描(30-80只) → 新闻分析(10-20只) → o3排名(Top 3) → 下单
-```
-
-### 四层漏斗
-
-| 层级 | 工具 | 成本 | 输出 |
-|------|------|------|------|
-| 第一层：技术扫描 | 本地Python | $0 | 30-80只异动股 |
-| 第二层：新闻分析 | gpt-4.1-mini + gpt-5.4 | ~$0.05/天 | 10-20只有催化剂的 |
-| 第三层：深度排名 | o3 | ~$0.10/天 | Top 3推荐 |
-| 第四层：执行 | Alpaca API | $0 | 下单+止损止盈 |
-
-### OpenAI模型分工
-
-| 模型 | 任务 | 何时调用 |
-|------|------|----------|
-| gpt-4.1-mini | 新闻情绪快筛 | 每条新闻 |
-| gpt-5.4 | 复杂新闻深度分析 | mini置信度<50时 |
-| o3 (high) | 横向排名 + 子弹分配 | 每轮筛选后 |
-
-## 关键规则
-
-### PDT规则（硬锁）
-- 5个交易日内最多3次日内交易
-- 系统自动追踪，**不可能超过3次**
-- 名额用完后系统只监控不交易
-
-### 风险管理（硬编码）
-- 单笔最大仓位：15%
-- 单笔最大亏损：1.5%
-- 单日最大亏损：3%（触发后停止交易）
-- 同时最多持2只
-- 3:50 PM强制平仓所有日内持仓
-
-### 子弹分配
-o3会根据本周剩余名额和剩余交易日数，决定今天该不该用名额。
-不是每个好信号都值得用——周四只剩1次的时候比周一剩3次要挑剔得多。
-
-## 对话模式
-
-Bot在后台跑着的时候，你可以另开一个终端跟AI对话：
-
-```bash
-# 用o3深度对话（默认）
-python chat.py
-
-# 用gpt-5.4（更快）
-python chat.py --model gpt-5.4
-
-# 用gpt-4.1-mini（最便宜，简单问题够用）
-python chat.py --model gpt-4.1-mini
-```
-
-对话助手会自动读取你的持仓、扫描结果、交易记录作为上下文。你可以问：
-- "RTX现在还能拿吗"
-- "今天扫描出了什么好机会"
-- "我这周还有几次日内交易名额"
-- "帮我分析一下能源板块最近的走势"
-- "如果油价跌回$90，我的持仓会怎样"
-
-对话中输入 `/help` 查看所有命令，`/status` 查看账户，`/model gpt-4.1-mini` 切换模型。
-
-## 文件结构
+## Project Structure
 
 ```
 trading_bot/
-├── bot.py              # 主程序（启动入口）
-├── chat.py             # 交互对话模式（连接OpenAI）
-├── scanner.py          # 全市场技术面扫描器
-├── news_analyzer.py    # 新闻情绪分析管道
-├── ranker.py           # o3深度排名系统
-├── executor.py         # Alpaca下单执行器
-├── pdt_tracker.py      # PDT名额追踪器
-├── risk_manager.py     # 风险管理规则
-├── config.py           # 配置参数
-├── requirements.txt    # Python依赖
-├── .env.example        # API Key模板
-└── logs/               # 运行日志（自动生成）
-    ├── trade_log.json
-    ├── pdt_trades.json
-    ├── risk_state.json
-    ├── seen_news_ids.json
-    └── daily_report_*.json
+├── agent.py              # Custom ReAct agent loop (core assignment deliverable)
+├── tools.py              # 7 tool definitions + implementations
+├── evaluation.py         # 20-test evaluation suite with quantitative metrics
+├── dashboard_server.py   # Flask server: autonomous bot + agent-powered chat
+├── dashboard.html        # Web UI with chat, positions, scan results
+├── scanner.py            # Market scanner (RSI, IBS, NATR, regime detection)
+├── executor.py           # Order execution (overnight + intraday)
+├── risk_manager.py       # Risk management (regime matrix, position limits)
+├── news_analyzer.py      # News sentiment analysis (structural risk veto)
+├── ranker.py             # o3 deep ranking with Man Group macro analogy
+├── pdt_tracker.py        # PDT day-trade tracking (3/5-day rolling window)
+├── config.py             # All configuration parameters
+├── sectors.json          # Stock-to-sector mapping (~200 stocks)
+├── bot.py                # CLI status tool
+├── .env                  # API keys (not committed)
+└── logs/                 # Trade logs, evaluation results, daily reports
 ```
 
-## 日成本估算
+## Design Choices
 
-| 项目 | 日成本 |
-|------|--------|
-| gpt-4.1-mini 新闻扫描 | ~$0.03 |
-| gpt-5.4 复杂新闻 | ~$0.05 |
-| o3 深度排名 | ~$0.10 |
-| **合计** | **~$0.18** |
-| **月成本** | **~$4** |
-| **$6000可用** | **~125年** |
+1. **Custom agent loop over frameworks**: The ReAct loop in `agent.py` is ~150 lines. LangChain would add 50+ dependencies for the same functionality. Writing it from scratch gives full control over iteration limits, error handling, and tool dispatch.
 
-## ⚠️ 重要提醒
+2. **OpenAI function-calling for tool selection**: The LLM sees JSON schemas and decides which tools to call. This is more reliable than text-parsing approaches (regex on "Action: tool_name").
 
-1. **先跑 `--dry-run` 至少1周** 确认逻辑正确再开始模拟盘交易
-2. **Paper Trading至少跑4周** 再考虑实盘
-3. **永远不要把 `.env` 文件上传到GitHub**
-4. 这是Paper Trading，亏的不是真钱，但要认真对待数据
-5. 切换到实盘时需要修改 `config.py` 中的 `ALPACA_BASE_URL` 和 `executor.py` 中的 `paper=False`
+3. **News as veto-only (≤10% weight)**: Academic research (MDPI 2025) shows text sentiment adds negligible predictive value. We use news only to block structurally dangerous trades (e.g., fraud, delisting).
+
+4. **No mechanical stop-loss for overnight**: Connors' research on 100K+ trades shows stop-losses hurt mean-reversion strategies. Position sizing controls risk instead.
+
+5. **3-variable regime matrix**: Simple VIX thresholds miss term structure signals. VIX/VIX3M ratio > 1.0 (backwardation) correctly identified COVID 2020, 2018 Volpocalypse, and 2025 tariff shock.
+
+## Tech Stack
+
+- **Python 3.13** — core language
+- **OpenAI API** — gpt-4.1-mini (fast), gpt-5.4 (deep analysis), o3 (ranking)
+- **Alpaca API** — market data, news, order execution (paper trading)
+- **Flask** — web server
+- **ta** — technical analysis indicators
+- **websocket-client** — real-time price streaming

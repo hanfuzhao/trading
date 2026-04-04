@@ -29,6 +29,8 @@ from risk_manager import RiskManager
 from news_analyzer import NewsAnalyzer
 from ranker import AIRanker
 from pdt_tracker import PDTTracker
+from tools import ToolRegistry
+from agent import TradingAgent
 
 ET = ZoneInfo("America/New_York")
 
@@ -44,6 +46,7 @@ news_analyzer: Optional[NewsAnalyzer] = None
 ranker: Optional[AIRanker] = None
 pdt: Optional[PDTTracker] = None
 openai_client: Optional[OpenAI] = None
+trading_agent: Optional[TradingAgent] = None
 
 latest_prices: Dict[str, float] = {}
 
@@ -512,7 +515,7 @@ def _generate_eod_report():
 # ================================================================
 
 def bot_loop():
-    global scanner, executor, risk, news_analyzer, ranker, pdt, openai_client
+    global scanner, executor, risk, news_analyzer, ranker, pdt, openai_client, trading_agent
 
     try:
         _log("初始化组件...")
@@ -523,7 +526,9 @@ def bot_loop():
         ranker = AIRanker()
         pdt = PDTTracker()
         openai_client = OpenAI(api_key=OPENAI_API_KEY)
-        _log("✅ 全部组件就绪")
+        tool_registry = ToolRegistry(scanner, executor, risk, news_analyzer, pdt)
+        trading_agent = TradingAgent(tool_registry)
+        _log("✅ 全部组件就绪 (Agent已初始化)")
     except Exception as e:
         _log(f"❌ 初始化失败: {e}", "error")
         traceback.print_exc()
@@ -803,42 +808,36 @@ def _format_scan_result(c: Dict, strategy: str) -> Dict:
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
+    """Agent-powered chat endpoint using custom ReAct loop."""
     try:
         data = request.json
         msg = data.get("message", "")
-        model = data.get("model", "gpt-4.1-mini")
 
-        acct = executor.get_account() if executor else {}
-        positions = executor.get_positions() if executor else []
-        regime = scanner.get_regime() if scanner else "unknown"
+        if not trading_agent:
+            return jsonify({"error": "Agent not initialized yet"})
 
-        context = f"""你是一个AI交易助手。以下是当前实时状态：
+        result = trading_agent.run(msg)
 
-账户: ${acct.get('portfolio_value', 0):,.2f} | 现金: ${acct.get('cash', 0):,.2f}
-Regime: {regime} | PDT剩余: {pdt.remaining_trades() if pdt else 0}/3
-持仓: {len(positions)}个 | 隔夜候选: {len(state['overnight_candidates'])} | 日内候选: {len(state['intraday_candidates'])}
-今日交易: {len(state['today_trades'])}笔
-Bot状态: {state['bot_status']}
-策略: v6 隔夜均值回归(RSI(2)<15+IBS<0.25) + 日内午后反转(14:00-14:45)
-风控: {risk.status(acct.get('portfolio_value', 0)) if risk else '未初始化'}
+        tool_calls_summary = [
+            {"tool": tc.tool, "args": tc.arguments, "latency_ms": tc.latency_ms}
+            for tc in result.tool_calls
+        ]
 
-用中文回答。简洁专业。"""
-
-        response = openai_client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": context},
-                {"role": "user", "content": msg},
-            ],
-            max_completion_tokens=1000,
-        )
-        reply = response.choices[0].message.content
-        usage = response.usage
         return jsonify({
-            "reply": reply, "model": model,
-            "tokens": {"prompt": usage.prompt_tokens, "completion": usage.completion_tokens, "total": usage.total_tokens},
+            "reply": result.response,
+            "model": result.model,
+            "tokens": {
+                "prompt": result.prompt_tokens,
+                "completion": result.completion_tokens,
+                "total": result.total_tokens,
+            },
+            "agent": {
+                "iterations": result.iterations,
+                "tool_calls": tool_calls_summary,
+            },
         })
     except Exception as e:
+        traceback.print_exc()
         return jsonify({"error": str(e)})
 
 
