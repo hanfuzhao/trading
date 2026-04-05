@@ -7,10 +7,10 @@ import argparse
 import sys
 from datetime import date
 
-from config import ALPACA_API_KEY, OPENAI_API_KEY, LOG_DIR
-from executor import OrderExecutor
-from pdt_tracker import PDTTracker
-from risk_manager import RiskManager
+from core.config import ALPACA_API_KEY, OPENAI_API_KEY, LOG_DIR
+from trading.executor import OrderExecutor
+from trading.pdt_tracker import PDTTracker
+from trading.risk_manager import RiskManager
 
 
 def print_status():
@@ -50,8 +50,8 @@ def main():
     if args.status:
         print_status()
     else:
-        print("v6 main entry has moved to dashboard_server.py")
-        print("Run: python dashboard_server.py")
+        print("v6 main entry has moved to server/dashboard_server.py")
+        print("Run: python -m server.dashboard_server")
         print("Or: python bot.py --status to view account status")
 
 

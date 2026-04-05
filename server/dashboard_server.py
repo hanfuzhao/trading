@@ -2,6 +2,9 @@
 Dashboard Server v6 - Full daily workflow
 70% overnight mean reversion + 30% intraday | WebSocket pre-market monitoring | 3-variable Regime
 """
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
 import json
 import logging
 import os
@@ -19,7 +22,7 @@ from zoneinfo import ZoneInfo
 from flask import Flask, jsonify, request, send_file
 from openai import OpenAI
 
-from config import (
+from core.config import (
     OPENAI_API_KEY, ALPACA_API_KEY, ALPACA_API_SECRET, ALPACA_WS_URL,
     REGIME_PARAMS, LOG_DIR, CATASTROPHIC_STOP_PCT,
     ON_TECH_W, ON_MACRO_W, ON_NEWS_W,
@@ -27,15 +30,15 @@ from config import (
     MONDAY_EXCEPTION_SCORE,
     ENTRY_TIMEOUT_SECONDS, TRAILING_ATR_MULT,
 )
-from scanner import MarketScanner
-from executor import OrderExecutor
-from risk_manager import RiskManager
-from news_analyzer import NewsAnalyzer
-from ranker import AIRanker
-from pdt_tracker import PDTTracker
-from tools import ToolRegistry
-from agent import TradingAgent
-from research import StockScorer, PricePredictor, PortfolioAnalyzer, deep_analyze
+from core.scanner import MarketScanner
+from trading.executor import OrderExecutor
+from trading.risk_manager import RiskManager
+from core.news_analyzer import NewsAnalyzer
+from core.ranker import AIRanker
+from trading.pdt_tracker import PDTTracker
+from agent.tools import ToolRegistry
+from agent.agent import TradingAgent
+from core.research import StockScorer, PricePredictor, PortfolioAnalyzer, deep_analyze
 
 ET = ZoneInfo("America/New_York")
 
@@ -759,7 +762,7 @@ def bot_loop():
 
 @app.route("/")
 def index():
-    resp = send_file("dashboard.html")
+    resp = send_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html"))
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
@@ -1154,7 +1157,7 @@ def api_auto_trade():
 @app.route("/api/sectors/list")
 def api_sectors_list():
     """Return available sectors for filter dropdowns."""
-    from scanner import SECTORS
+    from core.scanner import SECTORS
     unique = sorted(set(SECTORS.values()))
     return jsonify({"sectors": unique})
 

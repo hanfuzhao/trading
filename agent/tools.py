@@ -531,7 +531,7 @@ class ToolRegistry:
         if not self.scorer or not self.predictor:
             return {"error": "Research components not initialized"}
 
-        from research import deep_analyze
+        from core.research import deep_analyze
         return deep_analyze(symbol, self.scorer, self.predictor, self.news)
 
     # ────────────────────────────────────────────────────────────

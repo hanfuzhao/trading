@@ -7,7 +7,7 @@ from datetime import datetime, date, timedelta
 from typing import Dict, Optional, Tuple, List
 from zoneinfo import ZoneInfo
 
-from config import (
+from core.config import (
     REGIME_PARAMS, MAX_CONCURRENT_POSITIONS, MAX_SAME_SECTOR_OVERNIGHT,
     MAX_DAILY_LOSS_PCT, MAX_WEEKLY_LOSS_PCT,
     CONSECUTIVE_LOSS_COOLDOWN, COOLDOWN_HOURS, LOG_DIR,

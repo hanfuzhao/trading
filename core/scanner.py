@@ -6,6 +6,7 @@ Intraday scan: afternoon mean reversion (14:00-14:45 window)
 Man Group 7-variable macro analogy
 """
 import json
+import os
 import numpy as np
 import pandas as pd
 import ta
@@ -20,7 +21,7 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import GetAssetsRequest
 from alpaca.trading.enums import AssetClass, AssetStatus
 
-from config import (
+from core.config import (
     ALPACA_API_KEY, ALPACA_API_SECRET,
     MIN_STOCK_PRICE, MIN_AVG_VOLUME,
     RSI_2_THRESHOLD, RSI_2_EXTREME, IBS_THRESHOLD,
@@ -47,7 +48,9 @@ SECTOR_PENALTY_INTRADAY = {
 
 def _load_sectors() -> Dict[str, str]:
     try:
-        with open("sectors.json", "r") as f:
+        _here = os.path.dirname(os.path.abspath(__file__))
+        _sectors_path = os.path.join(_here, os.pardir, "sectors.json")
+        with open(_sectors_path, "r") as f:
             return json.load(f)
     except Exception:
         return {}

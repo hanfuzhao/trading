@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
 """
 Trading Assistant Chat Mode
 Connects to OpenAI, auto-injects current positions, scan results, market state as context
@@ -17,13 +20,13 @@ from datetime import datetime, date
 from typing import Dict, List, Optional
 from openai import OpenAI
 
-from config import (
+from core.config import (
     OPENAI_API_KEY, ALPACA_API_KEY, ALPACA_API_SECRET,
     MODEL_RANK, MODEL_DEEP, MODEL_FAST, LOG_DIR,
 )
-from executor import OrderExecutor
-from pdt_tracker import PDTTracker
-from risk_manager import RiskManager
+from trading.executor import OrderExecutor
+from trading.pdt_tracker import PDTTracker
+from trading.risk_manager import RiskManager
 
 
 class TradingChat:

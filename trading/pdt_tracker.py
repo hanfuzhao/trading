@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 from zoneinfo import ZoneInfo
 
-from config import PDT_MAX_DAY_TRADES, PDT_WINDOW_DAYS, LOG_DIR
+from core.config import PDT_MAX_DAY_TRADES, PDT_WINDOW_DAYS, LOG_DIR
 
 ET = ZoneInfo("America/New_York")
 

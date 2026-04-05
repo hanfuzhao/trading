@@ -1,3 +1,6 @@
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
 """
 Agent Evaluation Framework
 ─────────────────────────
@@ -29,15 +32,15 @@ from zoneinfo import ZoneInfo
 
 from openai import OpenAI
 
-from config import OPENAI_API_KEY, LOG_DIR
-from scanner import MarketScanner
-from executor import OrderExecutor
-from risk_manager import RiskManager
-from news_analyzer import NewsAnalyzer
-from pdt_tracker import PDTTracker
-from tools import ToolRegistry
-from agent import TradingAgent, AgentResult
-from research import StockScorer, PricePredictor, PortfolioAnalyzer
+from core.config import OPENAI_API_KEY, LOG_DIR
+from core.scanner import MarketScanner
+from trading.executor import OrderExecutor
+from trading.risk_manager import RiskManager
+from core.news_analyzer import NewsAnalyzer
+from trading.pdt_tracker import PDTTracker
+from agent.tools import ToolRegistry
+from agent.agent import TradingAgent, AgentResult
+from core.research import StockScorer, PricePredictor, PortfolioAnalyzer
 
 ET = ZoneInfo("America/New_York")
 
@@ -508,7 +511,7 @@ def main():
 
     # Research components
     from openai import OpenAI
-    from config import OPENAI_API_KEY
+    from core.config import OPENAI_API_KEY
     llm = OpenAI(api_key=OPENAI_API_KEY)
     scorer = StockScorer(scanner_inst, news_inst, llm)
     predictor = PricePredictor(scanner_inst, news_inst, llm)

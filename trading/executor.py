@@ -15,7 +15,7 @@ from alpaca.trading.requests import (
 )
 from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
 
-from config import (
+from core.config import (
     ALPACA_API_KEY, ALPACA_API_SECRET,
     LOG_DIR, MAX_CAPITAL,
     ENTRY_TIMEOUT_SECONDS, TIME_STOP_MINUTES,

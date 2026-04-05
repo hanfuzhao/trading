@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 from openai import OpenAI
 
-from config import (
+from core.config import (
     OPENAI_API_KEY, MODEL_RANK, MAX_O3_CALLS_PER_DAY,
     REGIME_PARAMS, MONDAY_EXCEPTION_SCORE,
 )

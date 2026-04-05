@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 from openai import OpenAI
 
-from config import OPENAI_API_KEY, ALPACA_API_KEY, ALPACA_API_SECRET, MODEL_FAST, MODEL_DEEP
+from core.config import OPENAI_API_KEY, ALPACA_API_KEY, ALPACA_API_SECRET, MODEL_FAST, MODEL_DEEP
 
 ET = ZoneInfo("America/New_York")
 

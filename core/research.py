@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from openai import OpenAI
 
-from config import (
+from core.config import (
     OPENAI_API_KEY, MODEL_FAST, MODEL_DEEP,
     SCORING_WEIGHTS, PREDICTION_HORIZONS,
     PREDICTION_CACHE_TTL, MAX_PREDICTION_CALLS_PER_HOUR,

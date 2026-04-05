@@ -29,8 +29,8 @@ from zoneinfo import ZoneInfo
 
 from openai import OpenAI
 
-from config import OPENAI_API_KEY
-from tools import TOOL_DEFINITIONS, ToolRegistry
+from core.config import OPENAI_API_KEY
+from agent.tools import TOOL_DEFINITIONS, ToolRegistry
 
 ET = ZoneInfo("America/New_York")
 
