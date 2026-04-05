@@ -110,19 +110,18 @@ Rules: Max position size 15%, max single loss <1.5%, max daily loss <3%, PDT 3 t
         { role: "user", content: userMsg }
       ];
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "gpt-4.1-mini",
           max_tokens: 1000,
-          system: buildContext(),
-          messages,
+          messages: [{ role: "system", content: buildContext() }, ...messages],
         }),
       });
 
       const data = await response.json();
-      const reply = data.content?.map(b => b.text || "").join("") || "Sorry, unable to get a response.";
+      const reply = data.choices?.[0]?.message?.content || "Sorry, unable to get a response.";
       setChatMessages(prev => [...prev, { role: "assistant", content: reply }]);
     } catch (err) {
       setChatMessages(prev => [...prev, { role: "assistant", content: `Connection failed: ${err.message}` }]);

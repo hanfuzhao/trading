@@ -42,7 +42,7 @@ TOOL_DEFINITIONS = [
             "name": "search_news",
             "description": (
                 "Search and analyze recent news for a stock. Returns headlines with "
-                "AI-generated sentiment (bullish/bearish/neutral), confidence, severity, "
+                "NLP sentiment (bullish/bearish/neutral), confidence, severity, "
                 "and whether the news is structurally significant."
             ),
             "parameters": {
