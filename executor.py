@@ -1,5 +1,5 @@
 """
-订单执行器 v6 — 隔夜/日内持仓分离 | 盘前止损 | Bracket Order | 延长时段
+Order Executor v6 - Overnight/intraday position separation | Pre-market stop | Bracket Order | Extended hours
 """
 import json
 import os
@@ -29,13 +29,13 @@ SKIP_TICKERS = {"SGOV"}
 
 class OrderExecutor:
     def __init__(self):
-        self.client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
+        self.client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=False)
         self.overnight_trades: Dict[str, Dict] = {}
         self.intraday_trades: Dict[str, Dict] = {}
         self._stop_order_ids: Dict[str, str] = {}
 
     # ================================================================
-    # 账户
+    # Account
     # ================================================================
 
     def get_account(self) -> Dict:
@@ -47,6 +47,7 @@ class OrderExecutor:
             "portfolio_value": pv, "cash": cash, "buying_power": bp,
             "equity": float(account.equity),
             "day_trade_count": int(account.daytrade_count),
+            "pattern_day_trader": bool(account.pattern_day_trader),
         }
 
     def get_positions(self) -> List[Dict]:
@@ -64,7 +65,7 @@ class OrderExecutor:
         return float(self.client.get_account().cash)
 
     # ================================================================
-    # 隔夜入场（15:30-15:45 Limit Order, 无机械止损）
+    # Overnight Entry (15:30-15:45 Limit Order, no mechanical stop)
     # ================================================================
 
     def enter_overnight(self, ticker: str, shares: int, limit_price: float,
@@ -83,7 +84,7 @@ class OrderExecutor:
                     self.client.cancel_order_by_id(order_id)
                 except Exception:
                     pass
-                return False, "隔夜入场超时未成交"
+                return False, "Overnight entry timed out without fill"
 
             stop_line = round(filled_price * (1 - CATASTROPHIC_STOP_PCT / 100), 2)
             self.overnight_trades[ticker] = {
@@ -96,14 +97,14 @@ class OrderExecutor:
             self._log_trade("OVERNIGHT_ENTRY", ticker, {
                 "shares": shares, "price": filled_price, "stop_line": stop_line,
             })
-            print(f"[执行] 隔夜 BUY {shares}股 {ticker} @${filled_price:.2f} | 止损线${stop_line:.2f}")
-            return True, f"隔夜成交 @${filled_price:.2f}"
+            print(f"[Executor] Overnight BUY {shares} shares {ticker} @${filled_price:.2f} | Stop line ${stop_line:.2f}")
+            return True, f"Overnight filled @${filled_price:.2f}"
         except Exception as e:
-            print(f"[执行] 隔夜入场失败 ({ticker}): {e}")
+            print(f"[Executor] Overnight entry failed ({ticker}): {e}")
             return False, str(e)
 
     # ================================================================
-    # 隔夜出场（9:45-10:15, 基于缺口方向）
+    # Overnight Exit (9:45-10:15, based on gap direction)
     # ================================================================
 
     def exit_overnight(self, ticker: str, current_price: float, reason: str = "") -> Tuple[bool, float]:
@@ -123,14 +124,14 @@ class OrderExecutor:
             self._log_trade("OVERNIGHT_EXIT", ticker, {
                 "pnl": pnl, "exit_price": current_price, "reason": reason,
             })
-            print(f"[执行] 隔夜出场 {ticker} @${current_price:.2f} | PnL${pnl:+.2f} | {reason}")
+            print(f"[Executor] Overnight exit {ticker} @${current_price:.2f} | PnL${pnl:+.2f} | {reason}")
             return True, pnl
         except Exception as e:
-            print(f"[执行] 隔夜出场失败 ({ticker}): {e}")
+            print(f"[Executor] Overnight exit failed ({ticker}): {e}")
             return False, 0
 
     # ================================================================
-    # 盘前止损（4:00 AM, 延长时段 Limit Sell）
+    # Pre-market Stop (4:00 AM, extended hours Limit Sell)
     # ================================================================
 
     def submit_premarket_stop(self, ticker: str, shares: int, price: float) -> bool:
@@ -142,16 +143,16 @@ class OrderExecutor:
                 extended_hours=True,
             )
             self.client.submit_order(order)
-            print(f"[执行] 盘前止损: {ticker} {shares}股 limit${aggressive_limit:.2f}")
+            print(f"[Executor] Pre-market stop: {ticker} {shares} shares limit${aggressive_limit:.2f}")
             if ticker in self.overnight_trades:
                 self.overnight_trades[ticker]["status"] = "premarket_stopped"
             return True
         except Exception as e:
-            print(f"[执行] 盘前止损失败 ({ticker}): {e}")
+            print(f"[Executor] Pre-market stop failed ({ticker}): {e}")
             return False
 
     # ================================================================
-    # 日内入场（14:00-14:45, Limit + Stop-Limit bracket）
+    # Intraday Entry (14:00-14:45, Limit + Stop-Limit bracket)
     # ================================================================
 
     def enter_intraday(self, ticker: str, shares: int, limit_price: float,
@@ -171,7 +172,7 @@ class OrderExecutor:
                     self.client.cancel_order_by_id(order_id)
                 except Exception:
                     pass
-                return False, "日内入场超时"
+                return False, "Intraday entry timed out"
 
             r_value = abs(filled_price - stop_loss)
             self.intraday_trades[ticker] = {
@@ -188,10 +189,10 @@ class OrderExecutor:
                 "shares": shares, "price": filled_price,
                 "stop_loss": stop_loss, "tp1": take_profit_1,
             })
-            print(f"[执行] 日内 BUY {shares}股 {ticker} @${filled_price:.2f} | SL${stop_loss:.2f}")
-            return True, f"日内成交 @${filled_price:.2f}"
+            print(f"[Executor] Intraday BUY {shares} shares {ticker} @${filled_price:.2f} | SL${stop_loss:.2f}")
+            return True, f"Intraday filled @${filled_price:.2f}"
         except Exception as e:
-            print(f"[执行] 日内入场失败 ({ticker}): {e}")
+            print(f"[Executor] Intraday entry failed ({ticker}): {e}")
             return False, str(e)
 
     def _set_stop_limit(self, ticker: str, stop_price: float, shares: int):
@@ -205,10 +206,10 @@ class OrderExecutor:
             result = self.client.submit_order(order)
             self._stop_order_ids[ticker] = str(result.id)
         except Exception as e:
-            print(f"[执行] 止损设置失败 ({ticker}): {e}")
+            print(f"[Executor] Stop-loss setup failed ({ticker}): {e}")
 
     # ================================================================
-    # 日内管理（分批止盈 + trailing + 时间止损）
+    # Intraday Management (partial take-profit + trailing + time stop)
     # ================================================================
 
     def update_trailing_stop(self, ticker: str, current_price: float):
@@ -237,9 +238,9 @@ class OrderExecutor:
                         breakeven = round(entry + 0.02, 2)
                         self._replace_stop_limit(ticker, breakeven, trade["remaining_shares"])
                         trade["stop_loss"] = breakeven
-                        print(f"[执行] TP1: {ticker} 平{partial_qty}股, SL→保本${breakeven:.2f}")
+                        print(f"[Executor] TP1: {ticker} closed {partial_qty} shares, SL->breakeven ${breakeven:.2f}")
                     except Exception as e:
-                        print(f"[执行] TP1失败 ({ticker}): {e}")
+                        print(f"[Executor] TP1 failed ({ticker}): {e}")
                 return
 
         if trade["partial_taken"]:
@@ -263,7 +264,7 @@ class OrderExecutor:
             return False
         gain = current_price - trade["entry_price"]
         if trade["r_value"] > 0 and gain < trade["r_value"] * 0.5:
-            print(f"[执行] ⏰ 时间止损: {ticker} {minutes:.0f}分钟, 盈利不足0.5R")
+            print(f"[Executor] Time stop: {ticker} {minutes:.0f} min, profit below 0.5R")
             return self.close_intraday(ticker)
         return False
 
@@ -284,10 +285,10 @@ class OrderExecutor:
             result = self.client.submit_order(order)
             self._stop_order_ids[ticker] = str(result.id)
         except Exception as e:
-            print(f"[执行] 移动止损失败 ({ticker}): {e}")
+            print(f"[Executor] Trailing stop update failed ({ticker}): {e}")
 
     # ================================================================
-    # 平仓
+    # Close Positions
     # ================================================================
 
     def close_intraday(self, ticker: str) -> bool:
@@ -303,11 +304,11 @@ class OrderExecutor:
                 del self._stop_order_ids[ticker]
             return True
         except Exception as e:
-            print(f"[执行] 日内平仓失败 ({ticker}): {e}")
+            print(f"[Executor] Intraday close failed ({ticker}): {e}")
             return False
 
     def close_all_intraday(self) -> List[Dict]:
-        """15:48 — 所有日内持仓市价平仓（保留隔夜）"""
+        """15:48 - Market close all intraday positions (keep overnight)"""
         closed = []
         positions = self.get_positions()
         overnight_tickers = {t for t, v in self.overnight_trades.items() if v["status"] == "held"}
@@ -319,7 +320,7 @@ class OrderExecutor:
         return closed
 
     def confirm_zero_intraday(self) -> bool:
-        """15:50 — 确认日内持仓为零（隔夜保留）"""
+        """15:50 - Confirm zero intraday positions (overnight retained)"""
         positions = self.get_positions()
         overnight_tickers = {t for t, v in self.overnight_trades.items() if v["status"] == "held"}
         active_intraday = [
@@ -327,12 +328,12 @@ class OrderExecutor:
             if p["ticker"] not in SKIP_TICKERS and p["ticker"] not in overnight_tickers
         ]
         if active_intraday:
-            print(f"[执行] ⚠️ 15:50 仍有 {len(active_intraday)} 个日内持仓！强制清仓")
+            print(f"[Executor] Warning: 15:50 still has {len(active_intraday)} intraday positions! Force closing")
             self.cancel_pending_orders()
             for p in active_intraday:
                 self.close_intraday(p["ticker"])
             return False
-        print("[执行] ✅ 15:50 日内持仓为零（隔夜持仓保留）")
+        print("[Executor] 15:50 zero intraday positions confirmed (overnight positions retained)")
         return True
 
     def check_closed_trades(self) -> List[Dict]:
@@ -356,11 +357,11 @@ class OrderExecutor:
                     del self._stop_order_ids[ticker]
                 closed.append({"ticker": ticker, "pnl": pnl, "type": "intraday"})
                 self._log_trade("INTRADAY_EXIT", ticker, {"pnl": pnl})
-                print(f"[执行] 日内 {ticker} 自动平仓 PnL${pnl:+.2f}")
+                print(f"[Executor] Intraday {ticker} auto-closed PnL${pnl:+.2f}")
         return closed
 
     # ================================================================
-    # 工具
+    # Utilities
     # ================================================================
 
     def _wait_for_fill(self, order_id: str, timeout: int = 120) -> Optional[float]:
@@ -394,7 +395,7 @@ class OrderExecutor:
             self.client.cancel_orders()
             self._stop_order_ids.clear()
         except Exception as e:
-            print(f"[执行] 取消挂单失败: {e}")
+            print(f"[Executor] Cancel pending orders failed: {e}")
 
     def _log_trade(self, trade_type: str, ticker: str, details: Dict):
         os.makedirs(LOG_DIR, exist_ok=True)

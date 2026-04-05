@@ -1,9 +1,9 @@
 """
-全市场扫描器 v6
-隔夜扫描: RSI(2)<15 + IBS<0.25 + NATR排序
-日内扫描: 午后均值回归（14:00-14:45窗口）
-3变量Regime: VIX/VIX3M + SPY/200SMA + VIX绝对水平
-Man Group 7变量宏观类比
+Market Scanner v6
+Overnight scan: RSI(2)<15 + IBS<0.25 + NATR ranking
+Intraday scan: afternoon mean reversion (14:00-14:45 window)
+3-variable Regime: VIX/VIX3M + SPY/200SMA + VIX absolute level
+Man Group 7-variable macro analogy
 """
 import json
 import numpy as np
@@ -14,6 +14,7 @@ from typing import List, Dict, Optional
 from zoneinfo import ZoneInfo
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest, StockSnapshotRequest
+from alpaca.data.enums import DataFeed
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import GetAssetsRequest
@@ -58,7 +59,7 @@ SECTORS = _load_sectors()
 class MarketScanner:
     def __init__(self):
         self.data_client = StockHistoricalDataClient(ALPACA_API_KEY, ALPACA_API_SECRET)
-        self.trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET)
+        self.trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=False)
         self._universe: Optional[List[str]] = None
         self._spy_df: Optional[pd.DataFrame] = None
         self._regime: str = "cautious"
@@ -70,13 +71,13 @@ class MarketScanner:
         self._man_group_vars: Dict = {}
 
     # ================================================================
-    # 股票池
+    # Stock Universe
     # ================================================================
 
     def get_tradeable_universe(self, force_refresh: bool = False) -> List[str]:
         if self._universe and not force_refresh:
             return self._universe
-        print("[扫描器] 获取可交易股票列表...")
+        print("[Scanner] Fetching tradeable stock list...")
         request = GetAssetsRequest(asset_class=AssetClass.US_EQUITY, status=AssetStatus.ACTIVE)
         assets = self.trading_client.get_all_assets(request)
         self._universe = [
@@ -84,11 +85,11 @@ class MarketScanner:
             if a.tradable and not a.symbol.isdigit()
             and "." not in a.symbol and len(a.symbol) <= 5
         ]
-        print(f"[扫描器] 可交易股票: {len(self._universe)} 只")
+        print(f"[Scanner] Tradeable stocks: {len(self._universe)}")
         return self._universe
 
     # ================================================================
-    # 数据获取
+    # Data Retrieval
     # ================================================================
 
     def get_snapshots(self, symbols: List[str]) -> Dict:
@@ -96,11 +97,11 @@ class MarketScanner:
         for i in range(0, len(symbols), 100):
             batch = symbols[i:i + 100]
             try:
-                request = StockSnapshotRequest(symbol_or_symbols=batch)
+                request = StockSnapshotRequest(symbol_or_symbols=batch, feed=DataFeed.IEX)
                 snapshots = self.data_client.get_stock_snapshot(request)
                 all_snapshots.update(snapshots)
             except Exception as e:
-                print(f"[扫描器] 快照失败 (batch {i}): {e}")
+                print(f"[Scanner] Snapshot failed (batch {i}): {e}")
         return all_snapshots
 
     def get_daily_bars(self, symbol: str, days: int = 50) -> Optional[pd.DataFrame]:
@@ -108,6 +109,7 @@ class MarketScanner:
             request = StockBarsRequest(
                 symbol_or_symbols=symbol, timeframe=TimeFrame.Day,
                 start=datetime.now(ET) - timedelta(days=days + 10), limit=days,
+                feed=DataFeed.IEX,
             )
             bars = self.data_client.get_stock_bars(request)
             bar_data = bars.data if hasattr(bars, 'data') else bars
@@ -125,7 +127,7 @@ class MarketScanner:
             return None
 
     # ================================================================
-    # 市场环境（每日刷新）
+    # Market Environment (daily refresh)
     # ================================================================
 
     def refresh_market_data(self):
@@ -144,7 +146,7 @@ class MarketScanner:
             if len(self._spy_df) >= 200:
                 sma200 = self._spy_df["close"].tail(200).mean()
                 self._spy_above_200sma = self._spy_df["close"].iloc[-1] > sma200
-                print(f"[扫描器] SPY vs 200SMA: {'上方' if self._spy_above_200sma else '下方'}")
+                print(f"[Scanner] SPY vs 200SMA: {'above' if self._spy_above_200sma else 'below'}")
 
     def _refresh_uso_data(self):
         try:
@@ -160,7 +162,7 @@ class MarketScanner:
             pass
 
     # ================================================================
-    # 3变量Regime检测（v6第五章）
+    # 3-Variable Regime Detection (v6 Chapter 5)
     # ================================================================
 
     def _detect_regime(self):
@@ -185,10 +187,10 @@ class MarketScanner:
         else:
             self._regime = "crisis"
 
-        print(f"[扫描器] Regime: {self._regime} | VIX/VIX3M={self._vix_vix3m_ratio:.3f} | SPY>200SMA={self._spy_above_200sma} | VIXY={self._vixy_price:.2f}")
+        print(f"[Scanner] Regime: {self._regime} | VIX/VIX3M={self._vix_vix3m_ratio:.3f} | SPY>200SMA={self._spy_above_200sma} | VIXY={self._vixy_price:.2f}")
 
     # ================================================================
-    # Man Group 7变量
+    # Man Group 7 Variables
     # ================================================================
 
     def _compute_man_group_vars(self):
@@ -222,7 +224,7 @@ class MarketScanner:
         self._man_group_vars = v
 
     # ================================================================
-    # 技术指标
+    # Technical Indicators
     # ================================================================
 
     def compute_indicators(self, df: pd.DataFrame) -> Dict:
@@ -269,12 +271,12 @@ class MarketScanner:
         }
 
     # ================================================================
-    # 隔夜扫描（v6第一章: RSI(2)<15 + IBS<0.25 + NATR排序）
+    # Overnight Scan (v6 Ch.1: RSI(2)<15 + IBS<0.25 + NATR ranking)
     # ================================================================
 
     def scan_overnight(self) -> List[Dict]:
         universe = self.get_tradeable_universe()
-        print(f"[扫描器] 隔夜扫描 {len(universe)} 只...")
+        print(f"[Scanner] Overnight scan {len(universe)} stocks...")
 
         snapshots = self.get_snapshots(universe)
         candidates = []
@@ -290,7 +292,7 @@ class MarketScanner:
             except Exception:
                 continue
 
-        print(f"[扫描器] 价格过滤后: {len(candidates)} 只")
+        print(f"[Scanner] After price filter: {len(candidates)}")
 
         detailed = []
         for c in candidates[:300]:
@@ -340,16 +342,16 @@ class MarketScanner:
             })
 
         detailed.sort(key=lambda x: x["natr"], reverse=True)
-        print(f"[扫描器] 隔夜候选: {len(detailed)} 只 (RSI(2)<{RSI_2_THRESHOLD} AND IBS<{IBS_THRESHOLD})")
+        print(f"[Scanner] Overnight candidates: {len(detailed)} (RSI(2)<{RSI_2_THRESHOLD} AND IBS<{IBS_THRESHOLD})")
         return detailed
 
     # ================================================================
-    # 日内扫描（v6: 午后均值回归, 14:00-14:45）
+    # Intraday Scan (v6: afternoon mean reversion, 14:00-14:45)
     # ================================================================
 
     def scan_intraday(self) -> List[Dict]:
         universe = self.get_tradeable_universe()
-        print(f"[扫描器] 日内扫描 {len(universe)} 只...")
+        print(f"[Scanner] Intraday scan {len(universe)} stocks...")
 
         snapshots = self.get_snapshots(universe)
         candidates = []
@@ -378,7 +380,7 @@ class MarketScanner:
             except Exception:
                 continue
 
-        print(f"[扫描器] 日内初筛: {len(candidates)} 只 (日内跌>{INTRADAY_DROP_PCT}%)")
+        print(f"[Scanner] Intraday pre-filter: {len(candidates)} (intraday drop>{INTRADAY_DROP_PCT}%)")
 
         detailed = []
         for c in candidates[:100]:
@@ -422,11 +424,122 @@ class MarketScanner:
             })
 
         detailed.sort(key=lambda x: x["signal_strength"], reverse=True)
-        print(f"[扫描器] 日内候选: {len(detailed)} 只")
+        print(f"[Scanner] Intraday candidates: {len(detailed)}")
         return detailed
 
     # ================================================================
-    # 公开查询
+    # Extended Technical Indicators (for research mode)
+    # ================================================================
+
+    def compute_extended_indicators(self, df: pd.DataFrame) -> Dict:
+        """Compute full indicator set including SMA/EMA/52w range/ROC."""
+        base = self.compute_indicators(df)
+        close = df["close"]
+
+        # Moving averages
+        if len(df) >= 50:
+            base["sma_50"] = round(close.tail(50).mean(), 2)
+        if len(df) >= 200:
+            base["sma_200"] = round(close.tail(200).mean(), 2)
+
+        base["ema_9"] = round(ta.trend.EMAIndicator(close, window=9).ema_indicator().iloc[-1], 2)
+        base["ema_21"] = round(ta.trend.EMAIndicator(close, window=21).ema_indicator().iloc[-1], 2)
+
+        # 52-week high/low (or max available)
+        base["high_52w"] = round(df["high"].max(), 2)
+        base["low_52w"] = round(df["low"].min(), 2)
+        base["pct_from_52w_high"] = round((close.iloc[-1] / df["high"].max() - 1) * 100, 2)
+
+        # Rate of change
+        if len(df) >= 10:
+            base["roc_10"] = round((close.iloc[-1] / close.iloc[-10] - 1) * 100, 2)
+        if len(df) >= 20:
+            base["roc_20"] = round((close.iloc[-1] / close.iloc[-20] - 1) * 100, 2)
+
+        # Stochastic RSI
+        stoch_rsi = ta.momentum.StochRSIIndicator(close, window=14)
+        base["stoch_rsi_k"] = round(stoch_rsi.stochrsi_k().iloc[-1], 2)
+        base["stoch_rsi_d"] = round(stoch_rsi.stochrsi_d().iloc[-1], 2)
+
+        return base
+
+    # ================================================================
+    # Research Scan (general purpose, strategy-agnostic)
+    # ================================================================
+
+    def scan_research(self, filters: Dict = None) -> List[Dict]:
+        """
+        General-purpose market scan for the research page.
+        Accepts filters: sectors, min_price, max_price, sort_by, limit,
+                         traits (list), horizons (list).
+        Returns stocks with price data and basic indicators.
+        """
+        filters = filters or {}
+        universe = self.get_tradeable_universe()
+        sectors_filter = filters.get("sectors", [])
+        min_price = filters.get("min_price", MIN_STOCK_PRICE)
+        max_price = filters.get("max_price", 999999)
+        sort_by = filters.get("sort_by", "change_pct")
+        limit = filters.get("limit", 50)
+        traits = set(filters.get("traits", []))
+
+        # Filter by sector first if specified
+        if sectors_filter:
+            universe = [s for s in universe if SECTORS.get(s, "Unknown") in sectors_filter]
+
+        # Filter by market cap traits before snapshot (narrow universe)
+        if "large_cap" in traits and "small_cap" not in traits:
+            # Only keep well-known large caps (rough heuristic: price > 50 or in known list)
+            pass  # applied after snapshot with price filter
+        if "small_cap" in traits and "large_cap" not in traits:
+            pass  # applied after snapshot
+
+        snapshots = self.get_snapshots(universe)
+        candidates = []
+
+        for symbol, snap in snapshots.items():
+            try:
+                if not snap or not snap.latest_trade or not snap.previous_daily_bar:
+                    continue
+                price = float(snap.latest_trade.price)
+                if price < min_price or price > max_price:
+                    continue
+                prev = float(snap.previous_daily_bar.close)
+                change_pct = (price - prev) / prev * 100 if prev else 0
+                today_vol = int(snap.daily_bar.volume) if snap.daily_bar else 0
+
+                # Trait-based pre-filter using snapshot data
+                if "large_cap" in traits and price < 50:
+                    continue
+                if "small_cap" in traits and price > 50:
+                    continue
+
+                candidates.append({
+                    "ticker": symbol,
+                    "price": round(price, 2),
+                    "change_pct": round(change_pct, 2),
+                    "volume": today_vol,
+                    "sector": SECTORS.get(symbol, "Unknown"),
+                })
+            except Exception:
+                continue
+
+        # Sort
+        reverse = sort_by not in ("change_pct_asc",)
+        sort_key = sort_by.replace("_asc", "").replace("_desc", "")
+        if sort_key == "change_pct":
+            candidates.sort(key=lambda x: abs(x.get("change_pct", 0)), reverse=True)
+        elif sort_key == "volume":
+            candidates.sort(key=lambda x: x.get("volume", 0), reverse=True)
+        elif sort_key == "price":
+            candidates.sort(key=lambda x: x.get("price", 0), reverse=reverse)
+        else:
+            candidates.sort(key=lambda x: abs(x.get("change_pct", 0)), reverse=True)
+
+        return candidates[:limit]
+
+    # ================================================================
+    # Public Queries
     # ================================================================
 
     def get_regime(self) -> str:

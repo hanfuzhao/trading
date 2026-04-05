@@ -60,7 +60,7 @@ const MOCK_SECTOR_ALLOCATION = [
   { name: "Cash", value: 12, color: "#6b7280" },
 ];
 
-const PDT_STATE = { used: 1, max: 3, next_unlock: "03/29 周一" };
+const PDT_STATE = { used: 1, max: 3, next_unlock: "03/29 Mon" };
 
 // ============================================================
 // MAIN DASHBOARD
@@ -68,7 +68,7 @@ const PDT_STATE = { used: 1, max: 3, next_unlock: "03/29 周一" };
 export default function TradingDashboard() {
   const [activeTab, setActiveTab] = useState("scanner");
   const [chatMessages, setChatMessages] = useState([
-    { role: "assistant", content: "交易助手已上线。我能看到你的持仓、扫描结果和市场状态。问我任何问题。" }
+    { role: "assistant", content: "Trading assistant online. I can see your positions, scanner results, and market status. Ask me anything." }
   ]);
   const [chatInput, setChatInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -87,14 +87,14 @@ export default function TradingDashboard() {
   }, [chatMessages]);
 
   const buildContext = useCallback(() => {
-    return `你是量化交易助手。以下是用户的实时数据：
-== 账户 == 总值$${MOCK_ACCOUNT.portfolio_value} 现金$${MOCK_ACCOUNT.cash} 日PnL$${MOCK_ACCOUNT.daily_pnl}
-== 持仓 == ${MOCK_POSITIONS.map(p => `${p.ticker}:${p.qty}股@$${p.entry},现价$${p.current},PnL${p.pnl_pct}%`).join(" | ")}
-== PDT == 已用${PDT_STATE.used}/${PDT_STATE.max}次
-== 今日扫描Top5 == ${MOCK_SCANNER.slice(0, 5).map(s => `${s.ticker}(强度${s.strength},情绪${s.sentiment})`).join(" | ")}
-== 最新新闻 == ${MOCK_NEWS.slice(0, 3).map(n => `${n.ticker}:${n.headline.slice(0, 40)}`).join(" | ")}
-== 宏观 == 美伊战争,油价>$110,Fed利率不变,S&P500修正区间,中期选举年
-规则：单笔最大仓位15%，单笔亏损<1.5%，日亏损<3%，PDT 3次/5天，3:50PM强制平仓。用中文简洁回答。`;
+    return `You are a quantitative trading assistant. Here is the user's real-time data:
+== Account == Total $${MOCK_ACCOUNT.portfolio_value} Cash $${MOCK_ACCOUNT.cash} Daily PnL $${MOCK_ACCOUNT.daily_pnl}
+== Positions == ${MOCK_POSITIONS.map(p => `${p.ticker}:${p.qty} shares@$${p.entry}, current $${p.current}, PnL ${p.pnl_pct}%`).join(" | ")}
+== PDT == Used ${PDT_STATE.used}/${PDT_STATE.max}
+== Today's Top 5 Scanner == ${MOCK_SCANNER.slice(0, 5).map(s => `${s.ticker}(strength ${s.strength}, sentiment ${s.sentiment})`).join(" | ")}
+== Latest News == ${MOCK_NEWS.slice(0, 3).map(n => `${n.ticker}:${n.headline.slice(0, 40)}`).join(" | ")}
+== Macro == US-Iran tensions, oil >$110, Fed rates unchanged, S&P500 correction range, midterm election year
+Rules: Max position size 15%, max single loss <1.5%, max daily loss <3%, PDT 3 trades/5 days, forced close at 3:50PM. Respond concisely in English.`;
   }, []);
 
   const sendMessage = async () => {
@@ -122,10 +122,10 @@ export default function TradingDashboard() {
       });
 
       const data = await response.json();
-      const reply = data.content?.map(b => b.text || "").join("") || "抱歉，无法获取回复。";
+      const reply = data.content?.map(b => b.text || "").join("") || "Sorry, unable to get a response.";
       setChatMessages(prev => [...prev, { role: "assistant", content: reply }]);
     } catch (err) {
-      setChatMessages(prev => [...prev, { role: "assistant", content: `连接失败: ${err.message}` }]);
+      setChatMessages(prev => [...prev, { role: "assistant", content: `Connection failed: ${err.message}` }]);
     } finally {
       setIsLoading(false);
     }
@@ -513,7 +513,7 @@ export default function TradingDashboard() {
                 fontSize: "12px",
                 maxWidth: "92%",
               }}>
-                <span style={{ animation: "pulse 1.5s infinite" }}>思考中...</span>
+                <span style={{ animation: "pulse 1.5s infinite" }}>Thinking...</span>
               </div>
             )}
             <div ref={chatEndRef} />
@@ -522,11 +522,11 @@ export default function TradingDashboard() {
           {/* Suggestion Chips */}
           <div style={{ padding: "6px 14px", display: "flex", gap: "6px", flexWrap: "wrap" }}>
             {[
-              "今天有什么好机会？",
-              "RTX还能拿吗？",
-              "分析OXY",
-              "PDT还剩几次？",
-              "油价影响分析",
+              "Any good opportunities today?",
+              "Should I hold RTX?",
+              "Analyze OXY",
+              "How many PDT trades left?",
+              "Oil price impact analysis",
             ].map((q, i) => (
               <button key={i} onClick={() => { setChatInput(q); setTimeout(() => inputRef.current?.focus(), 50); }} style={{
                 padding: "4px 10px",
@@ -558,7 +558,7 @@ export default function TradingDashboard() {
               value={chatInput}
               onChange={e => setChatInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && sendMessage()}
-              placeholder="问任何关于交易的问题..."
+              placeholder="Ask any trading question..."
               style={{
                 flex: 1,
                 padding: "10px 14px",
@@ -590,7 +590,7 @@ export default function TradingDashboard() {
                 transition: "all 0.2s",
               }}
             >
-              {isLoading ? "..." : "发送"}
+              {isLoading ? "..." : "Send"}
             </button>
           </div>
         </div>

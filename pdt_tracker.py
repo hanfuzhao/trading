@@ -1,6 +1,6 @@
 """
-PDT追踪器 - 滚动5个交易日窗口内的日内交易计数
-铁律：任何情况下不允许第4次日内交易
+PDT Tracker - Rolling 5 trading day window day trade count
+Iron rule: never allow a 4th day trade under any circumstance
 """
 import json
 import os
@@ -30,7 +30,7 @@ class PDTTracker:
             json.dump(self.trades, f, indent=2, default=str)
 
     def _get_trading_days(self, n: int) -> datetime:
-        """回溯n个交易日（跳过周末）"""
+        """Go back n trading days (skip weekends)"""
         dt = datetime.now(ET)
         count = 0
         while count < n:
@@ -53,7 +53,7 @@ class PDTTracker:
         return PDT_MAX_DAY_TRADES - len(self.get_trades_in_window())
 
     def record_day_trade(self, ticker: str, pnl: float = 0):
-        """记录一笔日内交易（同日开平仓）"""
+        """Record a day trade (same-day open and close)"""
         trade = {
             "date": datetime.now(ET).isoformat(),
             "ticker": ticker,
@@ -61,22 +61,22 @@ class PDTTracker:
         }
         self.trades.append(trade)
         self._save()
-        print(f"[PDT] 已记录日内交易: {ticker} PnL=${pnl:+.2f} | 剩余名额: {self.remaining_trades()}")
+        print(f"[PDT] Day trade recorded: {ticker} PnL=${pnl:+.2f} | Remaining slots: {self.remaining_trades()}")
 
     def next_trade_unlock(self) -> str:
         window_trades = self.get_trades_in_window()
         if len(window_trades) < PDT_MAX_DAY_TRADES:
-            return "现在就有名额"
+            return "Slots available now"
         oldest = min(window_trades, key=lambda t: t["date"])
         oldest_date = datetime.fromisoformat(oldest["date"])
         unlock_date = oldest_date + timedelta(days=7)
-        return f"预计 {unlock_date.strftime('%m/%d %A')} 恢复1个名额"
+        return f"Estimated {unlock_date.strftime('%m/%d %A')} 1 slot unlocks"
 
     def status(self) -> str:
         remaining = self.remaining_trades()
         if remaining == 0:
-            return f"⛔ 日内交易名额用完 (0/{PDT_MAX_DAY_TRADES}) | {self.next_trade_unlock()}"
+            return f"Day trade slots exhausted (0/{PDT_MAX_DAY_TRADES}) | {self.next_trade_unlock()}"
         elif remaining == 1:
-            return f"⚠️ 仅剩1次日内交易名额 (极度挑剔模式)"
+            return f"Only 1 day trade slot left (ultra-selective mode)"
         else:
-            return f"✅ 剩余 {remaining}/{PDT_MAX_DAY_TRADES} 次日内交易名额"
+            return f"{remaining}/{PDT_MAX_DAY_TRADES} day trade slots remaining"

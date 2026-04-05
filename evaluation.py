@@ -37,6 +37,7 @@ from news_analyzer import NewsAnalyzer
 from pdt_tracker import PDTTracker
 from tools import ToolRegistry
 from agent import TradingAgent, AgentResult
+from research import StockScorer, PricePredictor, PortfolioAnalyzer
 
 ET = ZoneInfo("America/New_York")
 
@@ -212,6 +213,72 @@ TEST_CASES = [
         "expected_tools": ["scan_overnight", "scan_intraday"],
         "expected_keywords": ["overnight", "intraday"],
         "rubric": "Should run both scans and compare the quality of candidates.",
+    },
+    # ── Category 6: Research Tools ───────────────────────────
+    {
+        "id": "research-1",
+        "category": "research",
+        "query": "Give me a deep multi-dimensional analysis of AAPL — scores, predictions, news.",
+        "expected_tools": ["get_stock_analysis"],
+        "expected_keywords": ["AAPL", "technical", "sentiment"],
+        "rubric": "Should call get_stock_analysis for AAPL and present multi-dimensional scores and predictions.",
+    },
+    {
+        "id": "research-2",
+        "category": "research",
+        "query": "Predict NVDA's price for the next 1 day, 1 week, and 1 month.",
+        "expected_tools": ["predict_price"],
+        "expected_keywords": ["NVDA", "prediction"],
+        "rubric": "Should call predict_price for NVDA and present predictions with confidence and reasoning.",
+    },
+    {
+        "id": "research-3",
+        "category": "research",
+        "query": "Scan the market for the best opportunities in the Energy sector.",
+        "expected_tools": ["scan_research"],
+        "expected_keywords": ["Energy"],
+        "rubric": "Should call scan_research with Energy sector filter and present scored results.",
+    },
+    {
+        "id": "research-4",
+        "category": "research",
+        "query": "Analyze my entire portfolio — give me health scores and recommendations for each position.",
+        "expected_tools": ["get_portfolio_analysis"],
+        "expected_keywords": ["portfolio", "recommendation"],
+        "rubric": "Should call get_portfolio_analysis and present per-position scores and Hold/Sell/Add recommendations.",
+    },
+    {
+        "id": "research-5",
+        "category": "research",
+        "query": "Which sectors are the strongest right now? Do a sector rotation analysis.",
+        "expected_tools": ["get_sector_analysis"],
+        "expected_keywords": ["sector"],
+        "rubric": "Should call get_sector_analysis and rank sectors by strength.",
+    },
+    {
+        "id": "research-6",
+        "category": "research",
+        "query": "I'm thinking about buying XOM. Give me a full research report — technicals, news, institutional ratings, and price predictions.",
+        "expected_tools": ["get_stock_analysis"],
+        "expected_keywords": ["XOM", "prediction", "score"],
+        "rubric": "Should call get_stock_analysis and synthesize a comprehensive buy/no-buy recommendation with supporting data.",
+    },
+    # ── Category 7: Research + Trading Combined ──────────────
+    {
+        "id": "combined-1",
+        "category": "combined",
+        "query": "Analyze my portfolio health, then scan the market for better opportunities to replace my weakest position.",
+        "expected_tools": ["get_portfolio_analysis", "scan_research"],
+        "expected_keywords": ["portfolio", "recommendation"],
+        "rubric": "Should check portfolio health first, identify the weakest position, then scan for replacements.",
+    },
+    {
+        "id": "combined-2",
+        "category": "combined",
+        "query": "Do a sector analysis, then find the top stock in the strongest sector and predict its price.",
+        "expected_tools": ["get_sector_analysis"],
+        "expected_keywords": ["sector", "predict"],
+        "rubric": "Should identify the strongest sector, then research or predict a top stock in that sector.",
     },
 ]
 
@@ -439,7 +506,18 @@ def main():
     scanner_inst.refresh_market_data()
     scanner_inst.get_tradeable_universe()
 
-    registry = ToolRegistry(scanner_inst, executor_inst, risk_inst, news_inst, pdt_inst)
+    # Research components
+    from openai import OpenAI
+    from config import OPENAI_API_KEY
+    llm = OpenAI(api_key=OPENAI_API_KEY)
+    scorer = StockScorer(scanner_inst, news_inst, llm)
+    predictor = PricePredictor(scanner_inst, news_inst, llm)
+    portfolio_an = PortfolioAnalyzer(scorer, predictor, executor_inst)
+
+    registry = ToolRegistry(
+        scanner_inst, executor_inst, risk_inst, news_inst, pdt_inst,
+        scorer, predictor, portfolio_an,
+    )
     agent = TradingAgent(registry)
 
     evaluator = AgentEvaluator(agent)

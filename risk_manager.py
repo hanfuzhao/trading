@@ -1,5 +1,5 @@
 """
-风险管理器 v6 — 3变量Regime矩阵 | 隔夜/日内分离 | 板块关联 | 日亏损2%
+Risk Manager v6 - 3-variable Regime matrix | Overnight/intraday separation | Sector correlation | Daily loss 2%
 """
 import json
 import os
@@ -68,7 +68,7 @@ class RiskManager:
             }, f, indent=2)
 
     # ================================================================
-    # 交易前检查
+    # Pre-trade Check
     # ================================================================
 
     def can_trade(self, portfolio_value: float) -> Tuple[bool, str]:
@@ -92,13 +92,13 @@ class RiskManager:
             self._save_state()
 
         if self.paused_until and today_et < self.paused_until:
-            return False, f"⛔ 连续亏损暂停至 {self.paused_until}"
+            return False, f"Paused due to consecutive losses until {self.paused_until}"
 
         if self.cooldown_until:
             now = datetime.now(ET)
             if now < self.cooldown_until:
                 remaining = (self.cooldown_until - now).total_seconds() / 60
-                return False, f"⛔ 冷却中，{remaining:.0f}分钟后恢复"
+                return False, f"Cooling down, {remaining:.0f} minutes until resume"
             else:
                 self.cooldown_until = None
                 self.consecutive_losses = 0
@@ -106,17 +106,17 @@ class RiskManager:
 
         daily_limit = portfolio_value * MAX_DAILY_LOSS_PCT / 100
         if self.daily_pnl <= -daily_limit:
-            return False, f"⛔ 日亏损${abs(self.daily_pnl):.2f}达上限"
+            return False, f"Daily loss ${abs(self.daily_pnl):.2f} hit limit"
 
         if self.consecutive_losses >= CONSECUTIVE_LOSS_COOLDOWN:
             self.cooldown_until = datetime.now(ET) + timedelta(hours=COOLDOWN_HOURS)
             self._save_state()
-            return False, f"⛔ 连续{self.consecutive_losses}笔亏损，暂停{COOLDOWN_HOURS}h"
+            return False, f"{self.consecutive_losses} consecutive losses, paused {COOLDOWN_HOURS}h"
 
-        return True, "✅ 可以交易"
+        return True, "OK to trade"
 
     # ================================================================
-    # 隔夜仓位校验
+    # Overnight Position Validation
     # ================================================================
 
     def validate_overnight(
@@ -127,11 +127,11 @@ class RiskManager:
         params = REGIME_PARAMS.get(regime, REGIME_PARAMS["cautious"])
 
         if len(current_overnight_tickers) >= 3:
-            return False, "⛔ 隔夜持仓已满3只", {}
+            return False, "Overnight positions full (3)", {}
 
         same_sector = sum(1 for t in current_overnight_tickers if t == sector)
         if same_sector >= MAX_SAME_SECTOR_OVERNIGHT:
-            return False, f"⛔ 同板块隔夜已达{MAX_SAME_SECTOR_OVERNIGHT}只", {}
+            return False, f"Same sector overnight limit reached ({MAX_SAME_SECTOR_OVERNIGHT})", {}
 
         max_pos_pct = params["on_max_pos_pct"]
         if self.half_size:
@@ -140,13 +140,13 @@ class RiskManager:
         max_value = portfolio_value * max_pos_pct / 100
         shares = int(max_value / price) if price > 0 else 0
         if shares <= 0:
-            return False, "⛔ 资金不足", {}
+            return False, "Insufficient funds", {}
 
         actual_pos_pct = (shares * price / portfolio_value) * 100
         risk_per_share = price * CATASTROPHIC_STOP_PCT / 100
         total_risk_pct = (risk_per_share * shares / portfolio_value) * 100
 
-        return True, "✅ 隔夜订单通过", {
+        return True, "Overnight order approved", {
             "ticker": ticker, "shares": shares,
             "entry_price": price,
             "position_pct": round(actual_pos_pct, 2),
@@ -154,7 +154,7 @@ class RiskManager:
         }
 
     # ================================================================
-    # 日内仓位校验
+    # Intraday Position Validation
     # ================================================================
 
     def validate_intraday(
@@ -164,14 +164,14 @@ class RiskManager:
         params = REGIME_PARAMS.get(regime, REGIME_PARAMS["cautious"])
 
         if current_positions >= MAX_CONCURRENT_POSITIONS:
-            return False, f"⛔ 总持仓已达{MAX_CONCURRENT_POSITIONS}", {}
+            return False, f"Total positions at limit ({MAX_CONCURRENT_POSITIONS})", {}
 
         if stop_loss <= 0 or stop_loss >= price:
-            return False, "⛔ 无效止损", {}
+            return False, "Invalid stop-loss", {}
 
         stop_dist_pct = (price - stop_loss) / price * 100
         if stop_dist_pct > 5:
-            return False, f"⛔ 止损距离{stop_dist_pct:.1f}%太大", {}
+            return False, f"Stop distance {stop_dist_pct:.1f}% too large", {}
 
         risk_pct = params["id_risk_pct"]
         if self.half_size:
@@ -187,15 +187,15 @@ class RiskManager:
 
         shares = min(shares_by_risk, shares_by_pos)
         if shares <= 0:
-            return False, "⛔ 风险限制下无法交易", {}
+            return False, "Cannot trade within risk limits", {}
 
-        return True, "✅ 日内订单通过", {
+        return True, "Intraday order approved", {
             "ticker": ticker, "shares": shares,
             "entry_price": price, "stop_loss": stop_loss,
         }
 
     # ================================================================
-    # 日内止损/止盈计算
+    # Intraday Stop-loss/Take-profit Calculation
     # ================================================================
 
     def calculate_intraday_stops(self, price: float, atr: float, regime: str) -> Dict:
@@ -208,7 +208,7 @@ class RiskManager:
         return {"stop_loss": stop_loss, "take_profit_1": tp1, "take_profit_2": tp2, "stop_distance": round(stop_dist, 2)}
 
     # ================================================================
-    # 记录
+    # Record
     # ================================================================
 
     def record_trade_result(self, pnl: float):
@@ -224,9 +224,9 @@ class RiskManager:
 
     def status(self, portfolio_value: float) -> str:
         limit = portfolio_value * MAX_DAILY_LOSS_PCT / 100
-        s = f"日PnL${self.daily_pnl:+.2f}(限-${limit:.0f}) | 连亏{self.consecutive_losses} | 周PnL${self.weekly_pnl:+.2f}"
+        s = f"Daily PnL ${self.daily_pnl:+.2f} (limit -${limit:.0f}) | Consec losses {self.consecutive_losses} | Weekly PnL ${self.weekly_pnl:+.2f}"
         if self.half_size:
-            s += " | ⚠️减仓"
+            s += " | Half-size mode"
         if self.cooldown_until:
-            s += f" | 冷却至{self.cooldown_until.strftime('%H:%M')}"
+            s += f" | Cooldown until {self.cooldown_until.strftime('%H:%M')}"
         return s

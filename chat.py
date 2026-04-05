@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-交易助手对话模式
-连接OpenAI，自动注入当前持仓、扫描结果、市场状态作为上下文
-你问任何问题，它都基于你的实时数据回答
+Trading Assistant Chat Mode
+Connects to OpenAI, auto-injects current positions, scan results, market state as context
+Ask any question and it responds based on your live data
 
-用法：
-    python chat.py                  # 默认用o3
-    python chat.py --model gpt-5.4  # 用gpt-5.4（更快更便宜）
-    python chat.py --model gpt-4.1-mini  # 最便宜，简单问题够用
+Usage:
+    python chat.py                  # Default uses o3
+    python chat.py --model gpt-5.4  # Use gpt-5.4 (faster and cheaper)
+    python chat.py --model gpt-4.1-mini  # Cheapest, sufficient for simple questions
 """
 import argparse
 import json
@@ -37,146 +37,146 @@ class TradingChat:
         self.system_prompt = ""
 
     # ================================================================
-    # 构建上下文
+    # Build Context
     # ================================================================
 
     def _build_context(self) -> str:
-        """收集所有实时数据，构建系统prompt"""
+        """Collect all live data and build system prompt"""
         sections = []
 
-        # 账户信息
+        # Account info
         try:
             account = self.executor.get_account()
-            sections.append(f"""== 账户状态 ==
-总值: ${account['portfolio_value']:,.2f}
-现金: ${account['cash']:,.2f}
-购买力: ${account['buying_power']:,.2f}
-PDT标记: {'是' if account['pattern_day_trader'] else '否'}""")
+            sections.append(f"""== Account Status ==
+Portfolio: ${account['portfolio_value']:,.2f}
+Cash: ${account['cash']:,.2f}
+Buying Power: ${account['buying_power']:,.2f}
+PDT Flag: {'Yes' if account['pattern_day_trader'] else 'No'}""")
         except Exception as e:
-            sections.append(f"== 账户状态 ==\n获取失败: {e}")
+            sections.append(f"== Account Status ==\nFailed to retrieve: {e}")
 
-        # PDT状态
-        sections.append(f"""== PDT名额 ==
+        # PDT status
+        sections.append(f"""== PDT Slots ==
 {self.pdt.status()}
-滚动窗口内已用交易: {3 - self.pdt.remaining_trades()}次
-下一个名额恢复: {self.pdt.next_trade_unlock()}""")
+Trades used in rolling window: {3 - self.pdt.remaining_trades()}
+Next slot unlock: {self.pdt.next_trade_unlock()}""")
 
-        # 风险状态
+        # Risk status
         try:
             pv = account['portfolio_value']
-            sections.append(f"""== 风险管理 ==
+            sections.append(f"""== Risk Management ==
 {self.risk.status(pv)}
-连续亏损: {self.risk.consecutive_losses}次
-单笔最大亏损上限: ${pv * 1.5 / 100:,.2f} (1.5%)
-单日最大亏损上限: ${pv * 3 / 100:,.2f} (3%)""")
+Consecutive losses: {self.risk.consecutive_losses}
+Max single trade loss: ${pv * 1.5 / 100:,.2f} (1.5%)
+Max daily loss: ${pv * 3 / 100:,.2f} (3%)""")
         except Exception:
             pass
 
-        # 当前持仓
+        # Current positions
         try:
             positions = self.executor.get_positions()
             if positions:
                 pos_text = "\n".join([
-                    f"  {p['ticker']:6s} | {p['qty']}股 | "
-                    f"入场${p['entry_price']:.2f} | 现价${p['current_price']:.2f} | "
+                    f"  {p['ticker']:6s} | {p['qty']} shares | "
+                    f"Entry ${p['entry_price']:.2f} | Current ${p['current_price']:.2f} | "
                     f"PnL: ${p['unrealized_pnl']:+.2f} ({p['unrealized_pnl_pct']:+.1f}%)"
                     for p in positions
                 ])
-                sections.append(f"== 当前持仓 ==\n{pos_text}")
+                sections.append(f"== Current Positions ==\n{pos_text}")
             else:
-                sections.append("== 当前持仓 ==\n无持仓")
+                sections.append("== Current Positions ==\nNo positions")
         except Exception:
-            sections.append("== 当前持仓 ==\n获取失败")
+            sections.append("== Current Positions ==\nFailed to retrieve")
 
-        # 今日扫描结果
+        # Today's scan results
         today_report = self._load_today_report()
         if today_report:
-            sections.append(f"""== 今日扫描 ==
-扫描次数: {today_report.get('scan_count', 'N/A')}
-原始候选: {today_report.get('raw_candidates', 'N/A')}只
-新闻筛选后: {today_report.get('after_news_filter', 'N/A')}只
-大盘环境: {today_report.get('market_context', '未知')}""")
+            sections.append(f"""== Today's Scan ==
+Scan count: {today_report.get('scan_count', 'N/A')}
+Raw candidates: {today_report.get('raw_candidates', 'N/A')}
+After news filter: {today_report.get('after_news_filter', 'N/A')}
+Market environment: {today_report.get('market_context', 'Unknown')}""")
 
             recs = today_report.get('recommendations', [])
             if recs:
                 rec_text = "\n".join([
                     f"  #{r.get('rank', '?')} {r.get('ticker', '?')} | "
-                    f"{r.get('action', '?')} | 置信度:{r.get('confidence', '?')} | "
-                    f"入场${r.get('entry_price', 0):.2f} | "
+                    f"{r.get('action', '?')} | Confidence:{r.get('confidence', '?')} | "
+                    f"Entry ${r.get('entry_price', 0):.2f} | "
                     f"R/R:{r.get('risk_reward_ratio', 0):.1f}"
                     for r in recs
                 ])
-                sections.append(f"== 今日推荐 ==\n{rec_text}")
+                sections.append(f"== Today's Recommendations ==\n{rec_text}")
 
-        # 最近交易记录
+        # Recent trades
         recent_trades = self._load_recent_trades()
         if recent_trades:
             trades_text = "\n".join([
                 f"  {t.get('timestamp', '?')[:16]} | {t.get('type', '?')} | "
                 f"{t.get('ticker', '?')} | "
                 f"${t.get('entry_price', t.get('exit_price', 0)):.2f}"
-                for t in recent_trades[-10:]  # 最近10笔
+                for t in recent_trades[-10:]  # Last 10 trades
             ])
-            sections.append(f"== 最近交易 ==\n{trades_text}")
+            sections.append(f"== Recent Trades ==\n{trades_text}")
 
-        # 虚拟信号（PDT用完时的记录）
+        # Virtual signals (recorded when PDT slots exhausted)
         virtual = self._load_virtual_signals()
         if virtual:
             v_text = "\n".join([
-                f"  {v['ticker']:6s} | 综合分:{v.get('combined_score', 0):>5.1f} | "
-                f"新闻情绪:{v.get('news_sentiment', 0):>5.1f}"
+                f"  {v['ticker']:6s} | Combined:{v.get('combined_score', 0):>5.1f} | "
+                f"News sentiment:{v.get('news_sentiment', 0):>5.1f}"
                 for v in virtual[:10]
             ])
-            sections.append(f"== 今日虚拟信号（未交易）==\n{v_text}")
+            sections.append(f"== Today's Virtual Signals (not traded) ==\n{v_text}")
 
-        # 当前时间
+        # Current time
         now = datetime.now()
-        weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()]
-        market_status = "盘前" if now.hour < 9 or (now.hour == 9 and now.minute < 30) else (
-            "盘中" if now.hour < 16 else "盘后"
+        weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][now.weekday()]
+        market_status = "Pre-market" if now.hour < 9 or (now.hour == 9 and now.minute < 30) else (
+            "Market open" if now.hour < 16 else "After-hours"
         )
-        sections.append(f"== 时间 ==\n{now.strftime('%Y-%m-%d %H:%M')} {weekday} | {market_status}")
+        sections.append(f"== Time ==\n{now.strftime('%Y-%m-%d %H:%M')} {weekday} | {market_status}")
 
-        # 宏观提醒
-        sections.append("""== 当前宏观环境（2026年3月底）==
-- 美伊战争持续，布伦特原油>$110，霍尔木兹海峡通行受阻
-- 美联储3月维持利率不变，仅预计2026年降息1次
-- Powell主席任期5月到期，继任者Warsh尚未确认
-- S&P 500连续5周下跌，纳斯达克和道琼斯进入修正区间
-- 2026为中期选举年，历史上前三季度波动加大
-- 关税通胀仍在消化中
-- 板块偏好：能源/防务受益于战争，医疗保健防御属性强，消费可选承压""")
+        # Macro reminder
+        sections.append("""== Current Macro Environment (late March 2026) ==
+- US-Iran conflict ongoing, Brent crude >$110, Strait of Hormuz passage disrupted
+- Fed held rates steady in March, only 1 rate cut projected for 2026
+- Chair Powell's term expires in May, successor Warsh not yet confirmed
+- S&P 500 down 5 consecutive weeks, Nasdaq and Dow Jones in correction territory
+- 2026 is a midterm election year, historically higher volatility in first 3 quarters
+- Tariff-driven inflation still being digested
+- Sector preference: Energy/Defense benefiting from conflict, Healthcare strong defensively, Consumer Discretionary under pressure""")
 
         return "\n\n".join(sections)
 
     def _build_system_prompt(self) -> str:
-        """构建完整的系统prompt"""
+        """Build the complete system prompt"""
         context = self._build_context()
 
-        return f"""你是我的私人量化交易助手。你可以看到我的完整账户状态、持仓、扫描结果和交易历史。
+        return f"""You are my personal quantitative trading assistant. You can see my full account status, positions, scan results, and trade history.
 
-你的职责：
-1. 基于实时数据回答我关于持仓、市场、策略的任何问题
-2. 如果我问"该不该买/卖某只股票"，你要结合我的账户状态、PDT名额、风险规则给出具体建议
-3. 你可以挑战我的决定——如果我要做的事违反风险规则或不明智，直接说
-4. 你的回答要简洁直接，不要客套
+Your responsibilities:
+1. Answer any questions about my positions, market, and strategy based on live data
+2. If I ask "should I buy/sell a stock", combine my account status, PDT slots, and risk rules to give specific advice
+3. You can challenge my decisions -- if what I'm about to do violates risk rules or is unwise, say so directly
+4. Keep your answers concise and direct, no pleasantries
 
-关键规则（你必须遵守）：
-- 单笔最大仓位15%
-- 单笔最大亏损1.5%
-- 单日最大亏损3%
-- PDT限制：5个交易日内最多3次日内交易
-- 3:50 PM必须平仓所有日内持仓
-- 如果我要做的事会违反这些规则，你必须明确拒绝并解释
+Key rules (you must follow):
+- Max single position 15%
+- Max single trade loss 1.5%
+- Max daily loss 3%
+- PDT limit: max 3 day trades in 5 trading days
+- Must close all intraday positions by 3:50 PM
+- If what I want to do would violate these rules, you must clearly refuse and explain
 
-以下是我的实时数据：
+Here is my live data:
 
 {context}
 
-用中文回答。简洁、直接、有数据支撑。"""
+Be concise, direct, and data-driven."""
 
     # ================================================================
-    # 加载数据文件
+    # Load Data Files
     # ================================================================
 
     def _load_today_report(self) -> Optional[Dict]:
@@ -201,22 +201,22 @@ PDT标记: {'是' if account['pattern_day_trader'] else '否'}""")
         return []
 
     # ================================================================
-    # 对话
+    # Chat
     # ================================================================
 
     def chat(self, user_message: str) -> str:
-        """发送消息并获取回复"""
+        """Send message and get reply"""
 
-        # 每次对话刷新系统prompt（持仓可能变了）
+        # Refresh system prompt each conversation (positions may have changed)
         self.system_prompt = self._build_system_prompt()
 
-        # 添加用户消息
+        # Add user message
         self.conversation.append({"role": "user", "content": user_message})
 
-        # 构建完整消息列表
+        # Build complete message list
         messages = [
             {"role": "system", "content": self.system_prompt},
-        ] + self.conversation[-20:]  # 只保留最近20轮，避免context太长
+        ] + self.conversation[-20:]  # Keep only last 20 turns to avoid context overflow
 
         try:
             if self.model.startswith("o") or self.model.startswith("gpt-5"):
@@ -235,12 +235,12 @@ PDT标记: {'是' if account['pattern_day_trader'] else '否'}""")
 
             reply = response.choices[0].message.content
 
-            # 记录token用量
+            # Log token usage
             usage = response.usage
             if usage:
                 input_tokens = usage.prompt_tokens
                 output_tokens = usage.completion_tokens
-                # 粗略成本估算
+                # Rough cost estimate
                 if self.model == MODEL_RANK:  # o3
                     cost = (input_tokens * 10 + output_tokens * 40) / 1_000_000
                 elif self.model == MODEL_DEEP:  # gpt-5.4
@@ -249,22 +249,22 @@ PDT标记: {'是' if account['pattern_day_trader'] else '否'}""")
                     cost = (input_tokens * 0.4 + output_tokens * 1.6) / 1_000_000
                 print(f"  [tokens: {input_tokens}+{output_tokens} | ~${cost:.4f}]")
 
-            # 保存助手回复
+            # Save assistant reply
             self.conversation.append({"role": "assistant", "content": reply})
 
             return reply
 
         except Exception as e:
-            error_msg = f"API调用失败: {e}"
+            error_msg = f"API call failed: {e}"
             print(f"  ❌ {error_msg}")
             return error_msg
 
     # ================================================================
-    # 特殊命令
+    # Special Commands
     # ================================================================
 
     def handle_command(self, user_input: str) -> Optional[str]:
-        """处理特殊命令（不调用API）"""
+        """Handle special commands (no API call)"""
         cmd = user_input.strip().lower()
 
         if cmd in ["/status", "/s"]:
@@ -274,29 +274,29 @@ PDT标记: {'是' if account['pattern_day_trader'] else '否'}""")
             try:
                 positions = self.executor.get_positions()
                 if not positions:
-                    return "当前无持仓"
+                    return "No positions"
                 lines = []
                 for p in positions:
                     lines.append(
-                        f"{p['ticker']:6s} | {p['qty']}股 | "
-                        f"入场${p['entry_price']:.2f} | 现价${p['current_price']:.2f} | "
+                        f"{p['ticker']:6s} | {p['qty']} shares | "
+                        f"Entry ${p['entry_price']:.2f} | Current ${p['current_price']:.2f} | "
                         f"PnL: ${p['unrealized_pnl']:+.2f} ({p['unrealized_pnl_pct']:+.1f}%)"
                     )
                 return "\n".join(lines)
             except Exception as e:
-                return f"获取持仓失败: {e}"
+                return f"Failed to get positions: {e}"
 
         if cmd in ["/pdt"]:
             return (
                 f"{self.pdt.status()}\n"
-                f"下一个名额恢复: {self.pdt.next_trade_unlock()}"
+                f"Next slot unlock: {self.pdt.next_trade_unlock()}"
             )
 
         if cmd in ["/cost"]:
             return (
-                f"当前模型: {self.model}\n"
-                f"本次对话轮数: {len(self.conversation) // 2}\n"
-                f"提示: /model <模型名> 切换模型"
+                f"Current model: {self.model}\n"
+                f"Conversation turns: {len(self.conversation) // 2}\n"
+                f"Tip: /model <name> to switch model"
             )
 
         if cmd.startswith("/model "):
@@ -304,89 +304,89 @@ PDT标记: {'是' if account['pattern_day_trader'] else '否'}""")
             valid = [MODEL_RANK, MODEL_DEEP, MODEL_FAST, "o3", "gpt-5.4", "gpt-4.1-mini"]
             if new_model in valid:
                 self.model = new_model
-                return f"已切换到 {new_model}"
-            return f"无效模型。可选: {', '.join(valid)}"
+                return f"Switched to {new_model}"
+            return f"Invalid model. Options: {', '.join(valid)}"
 
         if cmd in ["/clear", "/c"]:
             self.conversation = []
-            return "对话历史已清空"
+            return "Conversation history cleared"
 
         if cmd in ["/help", "/h", "?"]:
-            return """可用命令：
-/status, /s    — 查看完整账户状态
-/positions, /p — 查看当前持仓
-/pdt           — 查看PDT名额
-/model <名称>  — 切换模型 (o3, gpt-5.4, gpt-4.1-mini)
-/cost          — 查看本次对话成本
-/clear, /c     — 清空对话历史
-/help, /h      — 显示此帮助
-/quit, /q      — 退出
+            return """Available commands:
+/status, /s    - View full account status
+/positions, /p - View current positions
+/pdt           - View PDT slots
+/model <name>  - Switch model (o3, gpt-5.4, gpt-4.1-mini)
+/cost          - View conversation cost
+/clear, /c     - Clear conversation history
+/help, /h      - Show this help
+/quit, /q      - Exit
 
-直接输入任何问题即可与AI对话。"""
+Type any question to chat with the AI."""
 
         if cmd in ["/quit", "/q", "exit", "quit"]:
             return "__EXIT__"
 
-        return None  # 不是命令，走正常对话
+        return None  # Not a command, proceed with normal chat
 
     # ================================================================
-    # 主循环
+    # Main Loop
     # ================================================================
 
     def run(self):
-        """交互式对话主循环"""
+        """Interactive chat main loop"""
         print("\n" + "=" * 60)
-        print("🤖 交易助手对话模式")
-        print(f"   模型: {self.model}")
-        print("   输入 /help 查看命令 | 输入 /quit 退出")
+        print("Trading Assistant Chat Mode")
+        print(f"   Model: {self.model}")
+        print("   Type /help for commands | /quit to exit")
         print("=" * 60)
 
-        # 启动时显示账户状态
-        print("\n📊 正在加载账户数据...\n")
+        # Show account status on startup
+        print("\nLoading account data...\n")
         try:
             context_summary = self._build_context()
-            # 只打印前几行关键信息
+            # Print only the first few key lines
             for line in context_summary.split("\n")[:15]:
                 print(f"  {line}")
             print("  ...")
         except Exception as e:
-            print(f"  ⚠️ 部分数据加载失败: {e}")
+            print(f"  Warning: partial data load failed: {e}")
 
         print(f"\n{'─' * 60}")
-        print("准备好了。问我任何关于你的持仓、市场、策略的问题。\n")
+        print("Ready. Ask me anything about your positions, market, or strategy.\n")
 
         while True:
             try:
-                user_input = input("你 > ").strip()
+                user_input = input("You > ").strip()
             except (EOFError, KeyboardInterrupt):
-                print("\n再见！")
+                print("\nGoodbye!")
                 break
 
             if not user_input:
                 continue
 
-            # 检查特殊命令
+            # Check special commands
             cmd_result = self.handle_command(user_input)
             if cmd_result == "__EXIT__":
-                print("再见！")
+                print("Goodbye!")
                 break
             if cmd_result is not None:
                 print(f"\n{cmd_result}\n")
                 continue
 
-            # 正常对话
-            print(f"\n🤖 ({self.model}) 思考中...\n")
+            # Normal chat
+            print(f"\n({self.model}) Thinking...\n")
             reply = self.chat(user_input)
             print(f"{reply}\n")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="交易助手对话模式")
+    parser = argparse.ArgumentParser(description="Trading Assistant Chat Mode")
     parser.add_argument(
         "--model",
         default=MODEL_RANK,
         choices=[MODEL_RANK, MODEL_DEEP, MODEL_FAST, "o3", "gpt-5.4", "gpt-4.1-mini"],
-        help="选择模型（默认o3）",
+        help="Select model (default o3)",
     )
     args = parser.parse_args()
 

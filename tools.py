@@ -144,6 +144,114 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    # ── Research Platform Tools ──────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "get_stock_analysis",
+            "description": (
+                "Deep multi-dimensional analysis of a stock. Returns 5-dimension scores "
+                "(Technical, Sentiment, Macro, Fundamental, Institutional), composite score, "
+                "recommendation tier (Strong Buy/Buy/Watch/Avoid), AI price predictions "
+                "for 1d through 1 month, recent news with sentiment, and technical indicators."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock ticker symbol",
+                    }
+                },
+                "required": ["symbol"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "predict_price",
+            "description": (
+                "Get AI price predictions for a stock across 10 time horizons: "
+                "1 day, 2 days, 3 days, 4 days, 5 days, 1 week, 2 weeks, 3 weeks, "
+                "4 weeks, and 1 month. Each prediction includes expected % change, "
+                "confidence score, direction, and reasoning."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock ticker symbol",
+                    }
+                },
+                "required": ["symbol"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scan_research",
+            "description": (
+                "General-purpose market scan with custom filters. Not limited to "
+                "overnight/intraday strategy criteria. Scans the entire market and "
+                "returns stocks with multi-dimensional scores and recommendation tiers. "
+                "Use this for research and discovery."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sectors": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Filter by sectors (e.g. ['Energy', 'Healthcare']). Empty = all.",
+                    },
+                    "min_price": {
+                        "type": "number",
+                        "description": "Minimum stock price (default 10)",
+                    },
+                    "max_price": {
+                        "type": "number",
+                        "description": "Maximum stock price",
+                    },
+                    "sort_by": {
+                        "type": "string",
+                        "enum": ["change_pct", "volume", "price"],
+                        "description": "Sort results by this field (default: change_pct)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results to return (default 30, max 50)",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_portfolio_analysis",
+            "description": (
+                "Comprehensive portfolio health analysis. For each held position, "
+                "returns multi-dimensional scores, AI price predictions, and a "
+                "recommendation (Hold/Sell/Add) with reasoning."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_sector_analysis",
+            "description": (
+                "Analyze sector rotation and relative strength. Returns scoring "
+                "for major sectors to identify which sectors are favored and which "
+                "are underperforming in the current environment."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 
@@ -159,12 +267,16 @@ class ToolRegistry:
     """
 
     def __init__(self, scanner=None, executor=None, risk_manager=None,
-                 news_analyzer=None, pdt_tracker=None):
+                 news_analyzer=None, pdt_tracker=None,
+                 stock_scorer=None, price_predictor=None, portfolio_analyzer=None):
         self.scanner = scanner
         self.executor = executor
         self.risk = risk_manager
         self.news = news_analyzer
         self.pdt = pdt_tracker
+        self.scorer = stock_scorer
+        self.predictor = price_predictor
+        self.portfolio_analyzer = portfolio_analyzer
 
         self._dispatch: Dict[str, Callable] = {
             "get_stock_data": self.get_stock_data,
@@ -174,6 +286,11 @@ class ToolRegistry:
             "get_portfolio": self.get_portfolio,
             "get_macro_environment": self.get_macro_environment,
             "execute_trade": self.execute_trade,
+            "get_stock_analysis": self.get_stock_analysis,
+            "predict_price": self.predict_price,
+            "scan_research": self.scan_research,
+            "get_portfolio_analysis": self.get_portfolio_analysis,
+            "get_sector_analysis": self.get_sector_analysis,
         }
 
     def call(self, tool_name: str, arguments: Dict[str, Any]) -> Dict:
@@ -404,3 +521,122 @@ class ToolRegistry:
             if ok and self.pdt:
                 self.pdt.record_day_trade(symbol)
             return {"success": ok, "message": msg, "shares": shares, "price": limit_price}
+
+    # ────────────────────────────────────────────────────────────
+    # Tool 8: get_stock_analysis (Research)
+    # ────────────────────────────────────────────────────────────
+
+    def get_stock_analysis(self, symbol: str) -> Dict:
+        symbol = symbol.upper().strip()
+        if not self.scorer or not self.predictor:
+            return {"error": "Research components not initialized"}
+
+        from research import deep_analyze
+        return deep_analyze(symbol, self.scorer, self.predictor, self.news)
+
+    # ────────────────────────────────────────────────────────────
+    # Tool 9: predict_price (Research)
+    # ────────────────────────────────────────────────────────────
+
+    def predict_price(self, symbol: str) -> Dict:
+        symbol = symbol.upper().strip()
+        if not self.predictor:
+            return {"error": "Predictor not initialized"}
+
+        predictions = self.predictor.predict(symbol)
+        return {"symbol": symbol, "predictions": predictions}
+
+    # ────────────────────────────────────────────────────────────
+    # Tool 10: scan_research (Research)
+    # ────────────────────────────────────────────────────────────
+
+    def scan_research(self, sectors: List = None, min_price: float = 10,
+                      max_price: float = 999999, sort_by: str = "change_pct",
+                      limit: int = 30) -> Dict:
+        filters = {
+            "sectors": sectors or [],
+            "min_price": min_price,
+            "max_price": max_price,
+            "sort_by": sort_by,
+            "limit": min(limit, 50),
+        }
+        candidates = self.scanner.scan_research(filters)
+
+        # Score top 10
+        scored = []
+        for c in candidates[:10]:
+            if self.scorer:
+                try:
+                    scores = self.scorer.score_stock(c["ticker"])
+                    c["composite"] = scores.get("composite", 50)
+                    c["tier"] = scores.get("tier", "Watch")
+                except Exception:
+                    pass
+            scored.append(c)
+
+        return {
+            "results": scored + candidates[10:],
+            "count": len(candidates),
+            "scored_count": min(10, len(candidates)),
+        }
+
+    # ────────────────────────────────────────────────────────────
+    # Tool 11: get_portfolio_analysis (Research)
+    # ────────────────────────────────────────────────────────────
+
+    def get_portfolio_analysis(self) -> Dict:
+        if not self.portfolio_analyzer:
+            return {"error": "Portfolio analyzer not initialized"}
+
+        analysis = self.portfolio_analyzer.analyze()
+        return {
+            "positions": analysis,
+            "count": len(analysis),
+            "timestamp": datetime.now(ET).isoformat(),
+        }
+
+    # ────────────────────────────────────────────────────────────
+    # Tool 12: get_sector_analysis (Research)
+    # ────────────────────────────────────────────────────────────
+
+    def get_sector_analysis(self) -> Dict:
+        # Representative stocks per sector
+        sector_reps = {
+            "Technology": ["AAPL", "MSFT", "NVDA"],
+            "Healthcare": ["UNH", "JNJ", "PFE"],
+            "Energy E&P": ["XOM", "CVX", "COP"],
+            "Financial": ["JPM", "BAC", "GS"],
+            "Consumer Staples": ["PG", "KO", "WMT"],
+            "Consumer Discretionary": ["AMZN", "TSLA", "HD"],
+            "Defense": ["LMT", "RTX", "NOC"],
+            "Utilities": ["NEE", "DUK", "SO"],
+        }
+
+        sector_scores = {}
+        for sector, symbols in sector_reps.items():
+            scores_list = []
+            for sym in symbols:
+                if self.scorer:
+                    try:
+                        s = self.scorer.score_stock(sym)
+                        scores_list.append(s.get("composite", 50))
+                    except Exception:
+                        scores_list.append(50)
+                else:
+                    scores_list.append(50)
+
+            avg = sum(scores_list) / len(scores_list) if scores_list else 50
+            sector_scores[sector] = {
+                "avg_composite": round(avg, 1),
+                "stocks_sampled": len(symbols),
+                "tier": "Strong" if avg >= 70 else ("Moderate" if avg >= 50 else "Weak"),
+            }
+
+        # Sort by score
+        ranked = sorted(sector_scores.items(), key=lambda x: x[1]["avg_composite"], reverse=True)
+
+        return {
+            "sectors": {k: v for k, v in ranked},
+            "regime": self.scanner.get_regime(),
+            "timestamp": datetime.now(ET).isoformat(),
+        }
