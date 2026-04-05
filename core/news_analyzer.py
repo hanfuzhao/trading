@@ -1,6 +1,6 @@
-"""
-News Analyzer v6 - Weight <=10% | Risk filter only | is_structural veto power
-"""
+
+
+
 import json
 import traceback
 from datetime import datetime, timedelta
@@ -26,9 +26,9 @@ class NewsAnalyzer:
         except Exception:
             pass
 
-    # ================================================================
-    # News Retrieval
-    # ================================================================
+
+
+
 
     def get_news(self, ticker: str, limit: int = 10) -> List[Dict]:
         if not self._news_client:
@@ -59,15 +59,15 @@ class NewsAnalyzer:
         except Exception:
             return []
 
-    # ================================================================
-    # Risk Filter (v6: news used only for veto)
-    # ================================================================
+
+
+
 
     def check_structural_risk(self, ticker: str, price: float = 0) -> Dict:
-        """
-        Check for structural bearish news.
-        Returns: {vetoed: bool, reason: str, news_score: 0-100}
-        """
+
+
+
+
         news = self.get_news(ticker, limit=5)
         if not news:
             return {"vetoed": False, "reason": "No news", "news_score": 50}
@@ -110,9 +110,9 @@ class NewsAnalyzer:
             "analyses": analyses,
         }
 
-    # ================================================================
-    # Fast Analysis (gpt-4.1-mini, No-CoT)
-    # ================================================================
+
+
+
 
     def _analyze_fast(self, ticker: str, news_item: Dict, price: float = 0) -> Optional[Dict]:
         try:
@@ -137,9 +137,9 @@ is_structural: whether it changes company fundamentals (accounting fraud=true, a
         except Exception:
             return None
 
-    # ================================================================
-    # Deep Analysis (gpt-5.4, complex/macro/geopolitical news)
-    # ================================================================
+
+
+
 
     def analyze_deep(self, ticker: str, news_items: List[Dict], price: float = 0) -> Optional[Dict]:
         if not news_items:
@@ -168,15 +168,15 @@ Return pure JSON:
             traceback.print_exc()
             return None
 
-    # ================================================================
-    # Comprehensive Analysis (for research mode)
-    # ================================================================
+
+
+
 
     def get_comprehensive_analysis(self, ticker: str, price: float = 0) -> Dict:
-        """
-        Full news analysis combining structural risk, deep analysis, and web search.
-        Returns unified view for the research platform.
-        """
+
+
+
+
         news_items = self.get_news(ticker, limit=10)
         structural = self.check_structural_risk(ticker, price)
         deep = self.analyze_deep(ticker, news_items, price) if news_items else None
@@ -196,15 +196,15 @@ Return pure JSON:
             "vetoed": structural.get("vetoed", False),
         }
 
-    # ================================================================
-    # Analyst Ratings Search
-    # ================================================================
+
+
+
 
     def search_analyst_ratings(self, ticker: str) -> Dict:
-        """
-        Search web for analyst ratings, upgrades/downgrades, price targets.
-        Returns best-effort synthesis from web search.
-        """
+
+
+
+
         try:
             response = self.openai.chat.completions.create(
                 model=MODEL_FAST,
@@ -229,9 +229,9 @@ Return pure JSON:
             pass
         return {"consensus": "unknown", "summary": "Unable to retrieve analyst data."}
 
-    # ================================================================
-    # Web Search Supplement (OpenAI web_search_preview)
-    # ================================================================
+
+
+
 
     def web_search_supplement(self, ticker: str) -> Optional[Dict]:
         try:

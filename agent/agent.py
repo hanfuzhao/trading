@@ -1,25 +1,25 @@
-"""
-Trading Agent — Custom ReAct loop with OpenAI function-calling.
-No LangChain / CrewAI / AutoGen.  The planning and tool-dispatch
-loop is written from scratch.
 
-Architecture
-────────────
-  User message
-       │
-       ▼
-  ┌─────────┐   tool_call?   ┌──────────┐   result   ┌─────────┐
-  │   LLM   │ ───────────▶  │  Tool    │ ────────▶ │   LLM   │ ─▶ ...
-  │ (plan)  │               │ Registry │           │ (reason)│
-  └─────────┘               └──────────┘           └─────────┘
-       │ no tool_call                                    │
-       ▼                                                 ▼
-  Final answer                                     Final answer
 
-Each iteration the LLM either:
-  1. Calls one or more tools  →  results are appended and we loop
-  2. Returns a text answer   →  we stop and return it to the user
-"""
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import json
 import time as _time
 from dataclasses import dataclass, field
@@ -80,7 +80,7 @@ MAX_ITERATIONS = 10
 
 @dataclass
 class ToolCall:
-    """Record of a single tool invocation."""
+
     tool: str
     arguments: Dict[str, Any]
     result: Any
@@ -89,7 +89,7 @@ class ToolCall:
 
 @dataclass
 class AgentResult:
-    """Everything the agent produces for one user turn."""
+
     response: str
     tool_calls: List[ToolCall] = field(default_factory=list)
     iterations: int = 0
@@ -101,12 +101,12 @@ class AgentResult:
 
 
 class TradingAgent:
-    """
-    Custom ReAct agent loop.
 
-    ``run(message)`` sends the message through a plan→act→observe loop
-    until the LLM produces a final text answer (or hits MAX_ITERATIONS).
-    """
+
+
+
+
+
 
     def __init__(self, tool_registry: ToolRegistry, model: str = "gpt-4.1-mini"):
         self.llm = OpenAI(api_key=OPENAI_API_KEY)
@@ -115,16 +115,16 @@ class TradingAgent:
         self._conversation: List[Dict] = []
 
     def run(self, user_message: str, *, keep_history: bool = False) -> AgentResult:
-        """
-        Execute the agent loop for a single user turn.
 
-        Parameters
-        ----------
-        user_message : str
-            The user's natural-language request.
-        keep_history : bool
-            If True, previous conversation is preserved for multi-turn.
-        """
+
+
+
+
+
+
+
+
+
         start = _time.time()
 
         if not keep_history:
@@ -137,7 +137,7 @@ class TradingAgent:
         total_completion = 0
 
         for iteration in range(1, MAX_ITERATIONS + 1):
-            # ── 1. Call LLM ──────────────────────────────────────
+
             response = self.llm.chat.completions.create(
                 model=self.model,
                 messages=self._conversation,
@@ -154,10 +154,10 @@ class TradingAgent:
             choice = response.choices[0]
             assistant_msg = choice.message
 
-            # Append the raw assistant message (may contain tool_calls)
+
             self._conversation.append(_msg_to_dict(assistant_msg))
 
-            # ── 2. Check: final answer or tool calls? ────────────
+
             if not assistant_msg.tool_calls:
                 elapsed = int((_time.time() - start) * 1000)
                 return AgentResult(
@@ -171,7 +171,7 @@ class TradingAgent:
                     model=self.model,
                 )
 
-            # ── 3. Execute each tool call ────────────────────────
+
             for tc in assistant_msg.tool_calls:
                 tool_name = tc.function.name
                 try:
@@ -191,14 +191,14 @@ class TradingAgent:
                 )
                 all_tool_calls.append(record)
 
-                # Feed result back to the LLM
+
                 self._conversation.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "content": json.dumps(result, default=str),
                 })
 
-        # Exhausted iterations
+
         elapsed = int((_time.time() - start) * 1000)
         return AgentResult(
             response="[Agent reached maximum iterations without a final answer]",
@@ -213,7 +213,7 @@ class TradingAgent:
 
 
 def _msg_to_dict(msg) -> Dict:
-    """Convert an OpenAI ChatCompletionMessage to a serialisable dict."""
+
     d: Dict[str, Any] = {"role": msg.role}
     if msg.content:
         d["content"] = msg.content

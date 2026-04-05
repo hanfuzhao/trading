@@ -2,16 +2,8 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-"""
-Trading Assistant Chat Mode
-Connects to OpenAI, auto-injects current positions, scan results, market state as context
-Ask any question and it responds based on your live data
 
-Usage:
-    python chat.py                  # Default uses o3
-    python chat.py --model gpt-5.4  # Use gpt-5.4 (faster and cheaper)
-    python chat.py --model gpt-4.1-mini  # Cheapest, sufficient for simple questions
-"""
+
 import argparse
 import json
 import os
@@ -39,15 +31,15 @@ class TradingChat:
         self.conversation: List[Dict] = []
         self.system_prompt = ""
 
-    # ================================================================
-    # Build Context
-    # ================================================================
+
+
+
 
     def _build_context(self) -> str:
-        """Collect all live data and build system prompt"""
+
         sections = []
 
-        # Account info
+
         try:
             account = self.executor.get_account()
             sections.append(f"""== Account Status ==
@@ -58,13 +50,13 @@ PDT Flag: {'Yes' if account['pattern_day_trader'] else 'No'}""")
         except Exception as e:
             sections.append(f"== Account Status ==\nFailed to retrieve: {e}")
 
-        # PDT status
+
         sections.append(f"""== PDT Slots ==
 {self.pdt.status()}
 Trades used in rolling window: {3 - self.pdt.remaining_trades()}
 Next slot unlock: {self.pdt.next_trade_unlock()}""")
 
-        # Risk status
+
         try:
             pv = account['portfolio_value']
             sections.append(f"""== Risk Management ==
@@ -75,7 +67,7 @@ Max daily loss: ${pv * 3 / 100:,.2f} (3%)""")
         except Exception:
             pass
 
-        # Current positions
+
         try:
             positions = self.executor.get_positions()
             if positions:
@@ -91,7 +83,7 @@ Max daily loss: ${pv * 3 / 100:,.2f} (3%)""")
         except Exception:
             sections.append("== Current Positions ==\nFailed to retrieve")
 
-        # Today's scan results
+
         today_report = self._load_today_report()
         if today_report:
             sections.append(f"""== Today's Scan ==
@@ -111,18 +103,18 @@ Market environment: {today_report.get('market_context', 'Unknown')}""")
                 ])
                 sections.append(f"== Today's Recommendations ==\n{rec_text}")
 
-        # Recent trades
+
         recent_trades = self._load_recent_trades()
         if recent_trades:
             trades_text = "\n".join([
                 f"  {t.get('timestamp', '?')[:16]} | {t.get('type', '?')} | "
                 f"{t.get('ticker', '?')} | "
                 f"${t.get('entry_price', t.get('exit_price', 0)):.2f}"
-                for t in recent_trades[-10:]  # Last 10 trades
+                for t in recent_trades[-10:]
             ])
             sections.append(f"== Recent Trades ==\n{trades_text}")
 
-        # Virtual signals (recorded when PDT slots exhausted)
+
         virtual = self._load_virtual_signals()
         if virtual:
             v_text = "\n".join([
@@ -132,7 +124,7 @@ Market environment: {today_report.get('market_context', 'Unknown')}""")
             ])
             sections.append(f"== Today's Virtual Signals (not traded) ==\n{v_text}")
 
-        # Current time
+
         now = datetime.now()
         weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][now.weekday()]
         market_status = "Pre-market" if now.hour < 9 or (now.hour == 9 and now.minute < 30) else (
@@ -140,7 +132,7 @@ Market environment: {today_report.get('market_context', 'Unknown')}""")
         )
         sections.append(f"== Time ==\n{now.strftime('%Y-%m-%d %H:%M')} {weekday} | {market_status}")
 
-        # Macro reminder
+
         sections.append("""== Current Macro Environment (late March 2026) ==
 - US-Iran conflict ongoing, Brent crude >$110, Strait of Hormuz passage disrupted
 - Fed held rates steady in March, only 1 rate cut projected for 2026
@@ -153,7 +145,7 @@ Market environment: {today_report.get('market_context', 'Unknown')}""")
         return "\n\n".join(sections)
 
     def _build_system_prompt(self) -> str:
-        """Build the complete system prompt"""
+
         context = self._build_context()
 
         return f"""You are my personal quantitative trading assistant. You can see my full account status, positions, scan results, and trade history.
@@ -178,9 +170,9 @@ Here is my live data:
 
 Be concise, direct, and data-driven."""
 
-    # ================================================================
-    # Load Data Files
-    # ================================================================
+
+
+
 
     def _load_today_report(self) -> Optional[Dict]:
         path = os.path.join(LOG_DIR, f"daily_report_{date.today()}.json")
@@ -203,23 +195,23 @@ Be concise, direct, and data-driven."""
                 return json.load(f)
         return []
 
-    # ================================================================
-    # Chat
-    # ================================================================
+
+
+
 
     def chat(self, user_message: str) -> str:
-        """Send message and get reply"""
 
-        # Refresh system prompt each conversation (positions may have changed)
+
+
         self.system_prompt = self._build_system_prompt()
 
-        # Add user message
+
         self.conversation.append({"role": "user", "content": user_message})
 
-        # Build complete message list
+
         messages = [
             {"role": "system", "content": self.system_prompt},
-        ] + self.conversation[-20:]  # Keep only last 20 turns to avoid context overflow
+        ] + self.conversation[-20:]
 
         try:
             if self.model.startswith("o") or self.model.startswith("gpt-5"):
@@ -238,21 +230,21 @@ Be concise, direct, and data-driven."""
 
             reply = response.choices[0].message.content
 
-            # Log token usage
+
             usage = response.usage
             if usage:
                 input_tokens = usage.prompt_tokens
                 output_tokens = usage.completion_tokens
-                # Rough cost estimate
-                if self.model == MODEL_RANK:  # o3
+
+                if self.model == MODEL_RANK:
                     cost = (input_tokens * 10 + output_tokens * 40) / 1_000_000
-                elif self.model == MODEL_DEEP:  # gpt-5.4
+                elif self.model == MODEL_DEEP:
                     cost = (input_tokens * 5 + output_tokens * 15) / 1_000_000
-                else:  # mini
+                else:
                     cost = (input_tokens * 0.4 + output_tokens * 1.6) / 1_000_000
                 print(f"  [tokens: {input_tokens}+{output_tokens} | ~${cost:.4f}]")
 
-            # Save assistant reply
+
             self.conversation.append({"role": "assistant", "content": reply})
 
             return reply
@@ -262,12 +254,12 @@ Be concise, direct, and data-driven."""
             print(f"  ❌ {error_msg}")
             return error_msg
 
-    # ================================================================
-    # Special Commands
-    # ================================================================
+
+
+
 
     def handle_command(self, user_input: str) -> Optional[str]:
-        """Handle special commands (no API call)"""
+
         cmd = user_input.strip().lower()
 
         if cmd in ["/status", "/s"]:
@@ -330,25 +322,25 @@ Type any question to chat with the AI."""
         if cmd in ["/quit", "/q", "exit", "quit"]:
             return "__EXIT__"
 
-        return None  # Not a command, proceed with normal chat
+        return None
 
-    # ================================================================
-    # Main Loop
-    # ================================================================
+
+
+
 
     def run(self):
-        """Interactive chat main loop"""
+
         print("\n" + "=" * 60)
         print("Trading Assistant Chat Mode")
         print(f"   Model: {self.model}")
         print("   Type /help for commands | /quit to exit")
         print("=" * 60)
 
-        # Show account status on startup
+
         print("\nLoading account data...\n")
         try:
             context_summary = self._build_context()
-            # Print only the first few key lines
+
             for line in context_summary.split("\n")[:15]:
                 print(f"  {line}")
             print("  ...")
@@ -368,7 +360,7 @@ Type any question to chat with the AI."""
             if not user_input:
                 continue
 
-            # Check special commands
+
             cmd_result = self.handle_command(user_input)
             if cmd_result == "__EXIT__":
                 print("Goodbye!")
@@ -377,7 +369,7 @@ Type any question to chat with the AI."""
                 print(f"\n{cmd_result}\n")
                 continue
 
-            # Normal chat
+
             print(f"\n({self.model}) Thinking...\n")
             reply = self.chat(user_input)
             print(f"{reply}\n")

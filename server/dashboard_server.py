@@ -1,7 +1,7 @@
-"""
-Dashboard Server v6 - Full daily workflow
-70% overnight mean reversion + 30% intraday | WebSocket pre-market monitoring | 3-variable Regime
-"""
+
+
+
+
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -44,9 +44,9 @@ ET = ZoneInfo("America/New_York")
 
 app = Flask(__name__)
 
-# ================================================================
-# Global Components
-# ================================================================
+
+
+
 scanner: Optional[MarketScanner] = None
 executor: Optional[OrderExecutor] = None
 risk: Optional[RiskManager] = None
@@ -61,7 +61,7 @@ portfolio_analyzer: Optional[PortfolioAnalyzer] = None
 
 latest_prices: Dict[str, float] = {}
 watchlist: List[str] = []
-auto_trade_enabled: bool = False  # Auto-trade toggle, default off
+auto_trade_enabled: bool = False
 
 state = {
     "bot_status": "initializing",
@@ -87,17 +87,17 @@ def _log(msg: str, level: str = "info"):
 
 
 def _hm() -> int:
-    """Current Eastern time HHMM"""
+
     now = datetime.now(ET)
     return now.hour * 100 + now.minute
 
 
-# ================================================================
-# WebSocket Price Stream (v6 Ch.6: 15-line background thread)
-# ================================================================
+
+
+
 
 def _start_ws_thread(symbols: List[str]):
-    """Start WebSocket background thread to monitor live prices"""
+
     if not symbols:
         return
     try:
@@ -137,9 +137,9 @@ def _start_ws_thread(symbols: List[str]):
     _log("WebSocket background thread started")
 
 
-# ================================================================
-# Macro Scoring
-# ================================================================
+
+
+
 
 def _calc_macro_score() -> float:
     score = 50
@@ -153,12 +153,12 @@ def _calc_macro_score() -> float:
     return max(0, min(100, score))
 
 
-# ================================================================
-# Overnight Exit Logic (v6 Ch.4: gap direction)
-# ================================================================
+
+
+
 
 def _process_overnight_exits():
-    """09:45-10:15: Exit overnight positions based on gap direction"""
+
     if not auto_trade_enabled:
         return
     if not executor.overnight_trades:
@@ -199,12 +199,12 @@ def _process_overnight_exits():
                 _log(f"Overnight exit {ticker} @10:00 gap {gap_pct:+.1f}% PnL${pnl:+.2f}")
 
 
-# ================================================================
-# Pre-market Stop Monitoring (v6 Ch.6: 4:00AM WebSocket)
-# ================================================================
+
+
+
 
 def _premarket_stop_check():
-    """From 4:00 AM: Check if overnight positions trigger extreme gap stop"""
+
     if not auto_trade_enabled:
         return
     for ticker, trade in list(executor.overnight_trades.items()):
@@ -218,12 +218,12 @@ def _premarket_stop_check():
             state["today_trades"].append({"ticker": ticker, "type": "premarket_stop"})
 
 
-# ================================================================
-# Overnight Entry Flow (v6 Ch.9: 15:00-15:45)
-# ================================================================
+
+
+
 
 def _run_overnight_scan_and_entry():
-    """15:00-15:45: Scan -> News filter -> o3 ranking -> Entry"""
+
     if not auto_trade_enabled:
         _log("Auto-trade disabled, skipping overnight entry")
         return
@@ -333,12 +333,12 @@ def _execute_overnight_entries(recs: List[Dict], acct: Dict):
             _log(f"Overnight entry failed {ticker}: {msg}", "warning")
 
 
-# ================================================================
-# Intraday Entry Flow (v6 Ch.9: 14:00-14:45)
-# ================================================================
+
+
+
 
 def _run_intraday_scan_and_entry():
-    """14:00-14:45: Scan -> News filter -> o3 ranking -> Entry"""
+
     if not auto_trade_enabled:
         _log("Auto-trade disabled, skipping intraday entry")
         return
@@ -461,12 +461,12 @@ def _execute_intraday_entries(recs: List[Dict], acct: Dict):
             total_pos += 1
 
 
-# ================================================================
-# Intraday Position Monitoring
-# ================================================================
+
+
+
 
 def _monitor_intraday():
-    """Every 15s: Check intraday position stop-loss/take-profit/time stop"""
+
     if not executor.intraday_trades:
         return
 
@@ -491,12 +491,12 @@ def _monitor_intraday():
         state["today_trades"].append(c)
 
 
-# ================================================================
-# Intraday Exit (15:40-15:50)
-# ================================================================
+
+
+
 
 def _intraday_exit_sequence():
-    """15:40: Limit exit -> 15:48: Market close -> 15:50: Confirm zero intraday"""
+
     if not auto_trade_enabled:
         return
     hm = _hm()
@@ -511,9 +511,9 @@ def _intraday_exit_sequence():
         executor.confirm_zero_intraday()
 
 
-# ================================================================
-# End of Day Report
-# ================================================================
+
+
+
 
 def _generate_eod_report():
     trades = state["today_trades"]
@@ -535,9 +535,9 @@ def _generate_eod_report():
         json.dump(report, f, indent=2, default=str)
 
 
-# ================================================================
-# Main Loop
-# ================================================================
+
+
+
 
 def bot_loop():
     global scanner, executor, risk, news_analyzer, ranker, pdt, openai_client, trading_agent
@@ -552,7 +552,7 @@ def bot_loop():
         ranker = AIRanker()
         pdt = PDTTracker()
         openai_client = OpenAI(api_key=OPENAI_API_KEY, max_retries=0)
-        # Research platform components
+
         stock_scorer = StockScorer(scanner, news_analyzer, openai_client)
         price_predictor = PricePredictor(scanner, news_analyzer, openai_client)
         portfolio_analyzer = PortfolioAnalyzer(stock_scorer, price_predictor, executor)
@@ -563,7 +563,7 @@ def bot_loop():
         )
         trading_agent = TradingAgent(tool_registry)
         _log("All components ready (Agent + Research initialized)")
-        # Pre-cache portfolio analysis in background (fast first, then full)
+
         def _preload_portfolio():
             try:
                 portfolio_analyzer.analyze(fast_mode=True)
@@ -601,9 +601,9 @@ def bot_loop():
                 _time.sleep(300)
                 continue
 
-            # ══════════════════════════════════════
-            # Night 20:01 - 03:59 - Sleep
-            # ══════════════════════════════════════
+
+
+
             if hm > 2000 or hm < 400:
                 state["bot_status"] = "sleeping"
                 daily_init_done = False
@@ -616,9 +616,9 @@ def bot_loop():
                 _time.sleep(60)
                 continue
 
-            # ══════════════════════════════════════
-            # 04:00 - Daily initialization + WebSocket start
-            # ══════════════════════════════════════
+
+
+
             if hm >= 400 and not daily_init_done:
                 state["bot_status"] = "initializing"
                 _log("=== New Trading Day Start ===")
@@ -651,9 +651,9 @@ def bot_loop():
                 daily_init_done = True
                 state["bot_status"] = "premarket"
 
-            # ══════════════════════════════════════
-            # 04:00 - 09:25 - Pre-market mode
-            # ══════════════════════════════════════
+
+
+
             if 400 <= hm < 925:
                 state["bot_status"] = "premarket"
 
@@ -665,25 +665,25 @@ def bot_loop():
                 _time.sleep(15)
                 continue
 
-            # ══════════════════════════════════════
-            # 09:25 - 09:30 - Final preparation
-            # ══════════════════════════════════════
+
+
+
             if 925 <= hm < 930:
                 state["bot_status"] = "premarket"
                 _time.sleep(5)
                 continue
 
-            # ══════════════════════════════════════
-            # 09:30 - 09:45 - Market open observation (no orders)
-            # ══════════════════════════════════════
+
+
+
             if 930 <= hm < 945:
                 state["bot_status"] = "market_open"
                 _time.sleep(10)
                 continue
 
-            # ══════════════════════════════════════
-            # 09:45 - 10:15 - Overnight position exit
-            # ══════════════════════════════════════
+
+
+
             if 945 <= hm < 1015 and not overnight_exit_done:
                 state["bot_status"] = "executing"
                 _process_overnight_exits()
@@ -694,9 +694,9 @@ def bot_loop():
                 _time.sleep(5)
                 continue
 
-            # ══════════════════════════════════════
-            # 10:15 - 14:00 - Intraday monitoring
-            # ══════════════════════════════════════
+
+
+
             if 1015 <= hm < 1400:
                 state["bot_status"] = "running"
                 t = _time.time()
@@ -706,40 +706,40 @@ def bot_loop():
                 _time.sleep(10)
                 continue
 
-            # ══════════════════════════════════════
-            # 14:00 - 14:45 - Intraday entry window
-            # ══════════════════════════════════════
+
+
+
             if 1400 <= hm < 1445 and not intraday_entry_done:
                 _run_intraday_scan_and_entry()
                 intraday_entry_done = True
                 state["bot_status"] = "running"
 
-            # ══════════════════════════════════════
-            # 14:45 - 15:00 - Monitoring
-            # ══════════════════════════════════════
+
+
+
             if 1445 <= hm < 1500:
                 _monitor_intraday()
                 _time.sleep(10)
                 continue
 
-            # ══════════════════════════════════════
-            # 15:00 - 15:45 - Overnight stock selection + entry
-            # ══════════════════════════════════════
+
+
+
             if 1500 <= hm < 1545 and not overnight_entry_done:
                 _run_overnight_scan_and_entry()
                 overnight_entry_done = True
 
-            # ══════════════════════════════════════
-            # 15:40 - 15:50 - Intraday exit
-            # ══════════════════════════════════════
+
+
+
             if 1540 <= hm < 1550 and not intraday_exit_done:
                 _intraday_exit_sequence()
                 if hm >= 1550:
                     intraday_exit_done = True
 
-            # ══════════════════════════════════════
-            # 16:00 - 20:00 - After hours
-            # ══════════════════════════════════════
+
+
+
             if 1600 <= hm <= 2000:
                 state["bot_status"] = "after_hours"
                 if not eod_done:
@@ -756,9 +756,9 @@ def bot_loop():
             _time.sleep(30)
 
 
-# ================================================================
-# API Routes
-# ================================================================
+
+
+
 
 @app.route("/")
 def index():
@@ -858,7 +858,7 @@ def _format_scan_result(c: Dict, strategy: str) -> Dict:
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
-    """Agent-powered chat endpoint using custom ReAct loop."""
+
     try:
         data = request.json
         msg = data.get("message", "")
@@ -891,16 +891,16 @@ def api_chat():
         return jsonify({"error": str(e)})
 
 
-# ================================================================
-# Research Platform API Routes
-# ================================================================
+
+
+
 
 _portfolio_refreshing = False
 
 @app.route("/api/portfolio/detailed")
 def api_portfolio_detailed():
-    """Portfolio page: positions with scores, predictions, recommendations.
-    Returns cached data immediately; triggers background refresh if stale."""
+
+
     global _portfolio_refreshing
     try:
         if not portfolio_analyzer:
@@ -909,7 +909,7 @@ def api_portfolio_detailed():
         cached = portfolio_analyzer._cache
         if cached:
             ts, analysis = cached
-            # If cache older than 30 min, trigger background refresh
+
             if _time.time() - ts > 1800 and not _portfolio_refreshing:
                 _portfolio_refreshing = True
                 def _bg_refresh():
@@ -920,7 +920,7 @@ def api_portfolio_detailed():
                         _portfolio_refreshing = False
                 threading.Thread(target=_bg_refresh, daemon=True).start()
         else:
-            # No cache — run fast_mode (algorithmic only, no LLM) for instant results
+
             if not _portfolio_refreshing:
                 _portfolio_refreshing = True
                 def _bg_fast_then_full():
@@ -936,7 +936,7 @@ def api_portfolio_detailed():
                     finally:
                         _portfolio_refreshing = False
                 threading.Thread(target=_bg_fast_then_full, daemon=True).start()
-            # Return placeholder while fast analysis runs
+
             analysis = []
             for pos in executor.get_positions():
                 analysis.append({
@@ -971,7 +971,7 @@ def api_portfolio_detailed():
 
 @app.route("/api/portfolio/predictions/<symbol>")
 def api_portfolio_predictions(symbol):
-    """AI price predictions for a single stock."""
+
     try:
         if not price_predictor:
             return jsonify({"error": "Predictor not initialized"})
@@ -982,12 +982,12 @@ def api_portfolio_predictions(symbol):
 
 
 def _ai_rerank(scored: list, traits: list, horizons: list) -> list:
-    """Use LLM to re-rank scored stocks based on user's trait and horizon preferences."""
+
     try:
         if not openai_client:
             return scored
 
-        # Only re-rank the scored ones (those with composite != None)
+
         has_score = [s for s in scored if s.get("composite") is not None]
         no_score = [s for s in scored if s.get("composite") is None]
         if not has_score:
@@ -1036,7 +1036,7 @@ Only return the JSON array, no other text."""
             temperature=0.3,
         )
         text = resp.choices[0].message.content.strip()
-        # Extract JSON array
+
         match = re.search(r'\[.*\]', text, re.DOTALL)
         if match:
             rankings = json.loads(match.group())
@@ -1060,7 +1060,7 @@ Only return the JSON array, no other text."""
 
 @app.route("/api/research/scan", methods=["POST"])
 def api_research_scan():
-    """Research page: scan market with filters, return scored results."""
+
     try:
         if not scanner or not stock_scorer:
             return jsonify({"error": "Components not initialized"})
@@ -1077,11 +1077,11 @@ def api_research_scan():
             "traits": traits,
         }
 
-        # Step 1: scan for candidates (fast — just Alpaca snapshots)
+
         candidates = scanner.scan_research(filters)
 
-        # Step 2: return immediately — no scoring, no LLM
-        # Users click individual stocks for deep analysis
+
+
         return jsonify({
             "results": candidates,
             "count": len(candidates),
@@ -1097,7 +1097,7 @@ def api_research_scan():
 
 @app.route("/api/research/deep/<symbol>")
 def api_research_deep(symbol):
-    """Deep analysis for a single stock (uses gpt-5.4)."""
+
     try:
         if not stock_scorer or not price_predictor or not news_analyzer:
             return jsonify({"error": "Components not initialized"})
@@ -1110,7 +1110,7 @@ def api_research_deep(symbol):
 
 @app.route("/api/research/watchlist", methods=["GET", "POST", "DELETE"])
 def api_watchlist():
-    """Manage watchlist: GET returns all, POST adds, DELETE removes."""
+
     global watchlist
     if request.method == "POST":
         data = request.json or {}
@@ -1124,7 +1124,7 @@ def api_watchlist():
         watchlist = [s for s in watchlist if s != symbol]
         return jsonify({"watchlist": watchlist})
     else:
-        # GET — return watchlist with latest scores
+
         items = []
         for s in watchlist:
             try:
@@ -1143,7 +1143,7 @@ def api_watchlist():
 
 @app.route("/api/auto-trade", methods=["GET", "POST"])
 def api_auto_trade():
-    """Toggle auto-trading on/off. GET returns current status, POST toggles."""
+
     global auto_trade_enabled
     if request.method == "POST":
         data = request.json or {}
@@ -1156,15 +1156,15 @@ def api_auto_trade():
 
 @app.route("/api/sectors/list")
 def api_sectors_list():
-    """Return available sectors for filter dropdowns."""
+
     from core.scanner import SECTORS
     unique = sorted(set(SECTORS.values()))
     return jsonify({"sectors": unique})
 
 
-# ================================================================
-# Startup
-# ================================================================
+
+
+
 
 if __name__ == "__main__":
     os.makedirs(LOG_DIR, exist_ok=True)

@@ -1,6 +1,6 @@
-"""
-o3 Deep Ranking v6 - Man Group 7 variables | Overnight/intraday separate recommendations | News <=10% weight
-"""
+
+
+
 import json
 import traceback
 from datetime import datetime, date
@@ -39,9 +39,9 @@ class AIRanker:
             self._o3_calls_today = 0
         return self._o3_calls_today < MAX_O3_CALLS_PER_DAY
 
-    # ================================================================
-    # Overnight Candidate Ranking
-    # ================================================================
+
+
+
 
     def rank_overnight(
         self,
@@ -115,9 +115,9 @@ Return pure JSON (no markdown):
 }}"""
         return self._call_o3(prompt, "overnight")
 
-    # ================================================================
-    # Intraday Candidate Ranking
-    # ================================================================
+
+
+
 
     def rank_intraday(
         self,
@@ -210,9 +210,9 @@ Return pure JSON:
         recs = self._call_o3(prompt, "intraday")
         return self._validate_intraday_recs(recs, remaining_day_trades)
 
-    # ================================================================
-    # o3 API Call
-    # ================================================================
+
+
+
 
     def _call_o3(self, prompt: str, call_type: str) -> List[Dict]:
         try:
@@ -256,9 +256,9 @@ Return pure JSON:
                 break
         return valid
 
-    # ================================================================
-    # Formatting
-    # ================================================================
+
+
+
 
     def _format_man_group(self, vars: Dict) -> str:
         if not vars:

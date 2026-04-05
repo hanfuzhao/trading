@@ -1,12 +1,12 @@
-"""
-Research Module — AI-powered stock analysis, multi-dimensional scoring,
-and price predictions for the Research & Trading Platform.
 
-Components:
-  • StockScorer     — 5-dimension scoring (Technical/Sentiment/Macro/Fundamental/Institutional)
-  • PricePredictor  — AI price predictions for 10 time horizons (1d → 1mo)
-  • PortfolioAnalyzer — Per-position health analysis with Hold/Sell/Add recommendations
-"""
+
+
+
+
+
+
+
+
 import json
 import logging
 import time as _time
@@ -35,23 +35,23 @@ _llm_lock = _threading.Lock()
 _last_llm_done = 0.0
 
 _MODEL_FALLBACK_CHAIN = ["gpt-5.4", "o3", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini"]
-# Models that don't support temperature parameter
+
 _NO_TEMPERATURE_MODELS = {"o3", "o4-mini", "o1", "o1-mini"}
-_exhausted_models = {}  # model -> reset_time
+_exhausted_models = {}
 
 def _llm_call_with_retry(client, max_retries=2, **kwargs):
-    """Call OpenAI with model fallback: if one model's RPD is exhausted, try next."""
+
     global _last_llm_done
     requested_model = kwargs.get("model", "gpt-5.4")
 
-    # Build fallback chain starting from the requested model
+
     chain = [requested_model]
     for m in _MODEL_FALLBACK_CHAIN:
         if m not in chain:
             chain.append(m)
 
     for model in chain:
-        # Skip models known to be exhausted (until their reset time)
+
         if model in _exhausted_models:
             if _time.time() < _exhausted_models[model]:
                 log.info("[llm] skipping exhausted model %s", model)
@@ -59,10 +59,10 @@ def _llm_call_with_retry(client, max_retries=2, **kwargs):
             else:
                 del _exhausted_models[model]
 
-        # Prepare kwargs for this model
+
         call_kwargs = dict(kwargs)
         call_kwargs["model"] = model
-        # o-series models don't support temperature
+
         if model in _NO_TEMPERATURE_MODELS or model.startswith("o"):
             call_kwargs.pop("temperature", None)
 
@@ -81,62 +81,62 @@ def _llm_call_with_retry(client, max_retries=2, **kwargs):
                     _last_llm_done = _time.time()
                     err = str(e)
                     if "429" in err:
-                        # Check if it's daily (RPD) exhaustion vs per-minute (RPM)
+
                         if "per day" in err or "RPD" in err:
                             log.warning("[llm] %s daily limit exhausted, trying next model", model)
-                            _exhausted_models[model] = _time.time() + 3600  # skip for 1hr
-                            break  # move to next model in chain
+                            _exhausted_models[model] = _time.time() + 3600
+                            break
                         elif attempt < max_retries - 1:
                             wait = 25 + attempt * 15
                             log.warning("[llm] %s 429 RPM, waiting %ds (attempt %d/%d)", model, wait, attempt + 1, max_retries)
                             _time.sleep(wait)
                         else:
                             log.warning("[llm] %s RPM retries exhausted, trying next model", model)
-                            break  # move to next model
+                            break
                     else:
                         raise
 
     raise Exception("All models exhausted (rate limited). Try again later.")
 
 
-# ================================================================
-# StockScorer — Multi-dimensional scoring
-# ================================================================
+
+
+
 
 class StockScorer:
-    """
-    Scores a stock on 5 dimensions (0-100 each) and produces
-    a weighted composite + recommendation tier.
 
-    Dimensions:
-      1. Technical   — algorithmic, from scanner indicators (no LLM)
-      2. Sentiment   — from news_analyzer sentiment scores
-      3. Macro       — from regime + Man Group variables
-      4. Fundamental  — LLM-synthesized from news + price trends
-      5. Institutional — LLM web-search for analyst ratings
-    """
+
+
+
+
+
+
+
+
+
+
 
     def __init__(self, scanner, news_analyzer, openai_client: OpenAI = None):
         self.scanner = scanner
         self.news = news_analyzer
         self.llm = openai_client or OpenAI(api_key=OPENAI_API_KEY, max_retries=0)
-        self._cache: Dict[str, Tuple[float, Dict]] = {}  # symbol -> (timestamp, scores)
+        self._cache: Dict[str, Tuple[float, Dict]] = {}
 
     def score_stock(self, symbol: str, use_cache: bool = True, fast_mode: bool = False) -> Dict:
-        """
-        Return multi-dimensional scores for a stock.
 
-        Returns:
-            {symbol, price, change_pct, scores: {technical, sentiment, macro, fundamental, institutional},
-             composite, tier, timestamp}
-        """
+
+
+
+
+
+
         now = _time.time()
         if use_cache and symbol in self._cache:
             ts, cached = self._cache[symbol]
             if now - ts < PREDICTION_CACHE_TTL:
                 return cached
 
-        # Get base data
+
         snapshots = self.scanner.get_snapshots([symbol])
         snap = snapshots.get(symbol)
         if not snap or not snap.latest_trade:
@@ -149,7 +149,7 @@ class StockScorer:
         df = self.scanner.get_daily_bars(symbol, days=200)
         indicators = self.scanner.compute_indicators(df) if df is not None else {}
 
-        # Compute each dimension (returns {score, reasoning})
+
         tech = self._score_technical(indicators, price, df)
         sent = self._score_sentiment(symbol)
         macro = self._score_macro()
@@ -205,7 +205,7 @@ class StockScorer:
         self._cache[symbol] = (now, result)
         return result
 
-    # ── Dimension 1: Technical (pure algorithmic) ──────────────
+
 
     def _score_technical(self, ind: Dict, price: float, df) -> Dict:
         if not ind:
@@ -214,7 +214,7 @@ class StockScorer:
         score = 50
         factors = []
 
-        # RSI(14) — oversold is opportunity
+
         rsi14 = ind.get("rsi_14", 50)
         if rsi14 < 30:
             score += 20; factors.append(f"RSI({rsi14:.0f}) oversold — bullish")
@@ -225,13 +225,13 @@ class StockScorer:
         elif rsi14 > 60:
             score -= 5; factors.append(f"RSI({rsi14:.0f}) elevated")
 
-        # MACD cross
+
         if ind.get("macd_cross") == "golden":
             score += 15; factors.append("MACD golden cross — bullish")
         elif ind.get("macd_cross") == "death":
             score -= 15; factors.append("MACD death cross — bearish")
 
-        # Bollinger Band position
+
         bb_lower = ind.get("bb_lower", 0)
         bb_upper = ind.get("bb_upper", 0)
         if bb_upper > bb_lower and bb_upper != bb_lower:
@@ -241,19 +241,19 @@ class StockScorer:
             elif bb_pct > 0.8:
                 score -= 10; factors.append(f"Near Bollinger upper band ({bb_pct:.0%}) — stretched")
 
-        # Support/Resistance proximity
+
         support = ind.get("support", 0)
         if support > 0 and price > 0:
             dist_to_support = (price - support) / price
             if dist_to_support < 0.02:
                 score += 10; factors.append(f"Near support at ${support:.2f}")
 
-        # Trend — consecutive down days (mean reversion opportunity)
+
         consec = ind.get("consecutive_down", 0)
         if consec >= 3:
             score += 10; factors.append(f"{consec} consecutive down days — reversion opportunity")
 
-        # SMA alignment
+
         if df is not None and len(df) >= 50:
             sma50 = df["close"].tail(50).mean()
             if price > sma50:
@@ -271,7 +271,7 @@ class StockScorer:
         final = max(0, min(100, score))
         return {"score": final, "reasoning": "; ".join(factors) if factors else "Neutral technical setup"}
 
-    # ── Dimension 2: Sentiment ────────────────────────────────
+
 
     def _score_sentiment(self, symbol: str) -> Dict:
         try:
@@ -288,7 +288,7 @@ class StockScorer:
         except Exception:
             return {"score": 50, "reasoning": "Unable to fetch news sentiment"}
 
-    # ── Dimension 3: Macro ────────────────────────────────────
+
 
     def _score_macro(self) -> Dict:
         regime = self.scanner.get_regime()
@@ -310,7 +310,7 @@ class StockScorer:
 
         return {"score": max(0, min(100, score)), "reasoning": "; ".join(factors)}
 
-    # ── Dimension 4: Fundamental (LLM-synthesized) ────────────
+
 
     def _score_fundamental(self, symbol: str, price: float,
                            change_pct: float, indicators: Dict,
@@ -321,7 +321,7 @@ class StockScorer:
                 f"- {n.get('headline', '')}" for n in news_items[:5]
             ) if news_items else "No recent news available."
 
-            # Build price trend context
+
             trend_ctx = ""
             if df is not None and len(df) >= 20:
                 closes = df["close"].tail(20).tolist()
@@ -348,7 +348,7 @@ Return pure JSON: {{"score": <0-100>, "reasoning": "<one sentence>"}}"""
             )
             raw = response.choices[0].message.content.strip()
             log.info("[fundamental] %s raw LLM response: %s", symbol, raw[:300])
-            # Extract JSON from response (may be wrapped in markdown code block)
+
             import re as _re
             json_match = _re.search(r'\{[^{}]*\}', raw)
             data = json.loads(json_match.group()) if json_match else json.loads(raw)
@@ -359,7 +359,7 @@ Return pure JSON: {{"score": <0-100>, "reasoning": "<one sentence>"}}"""
             log.error("[fundamental] %s FAILED: %s", symbol, e, exc_info=True)
             return {"score": 50, "reasoning": "Analysis unavailable"}
 
-    # ── Dimension 5: Institutional (web search) ───────────────
+
 
     def _score_institutional(self, symbol: str) -> Dict:
         try:
@@ -394,16 +394,16 @@ Return pure JSON: {{"score": <0-100>, "reasoning": "<one sentence>"}}"""
         return {"score": 50, "reasoning": "Analysis unavailable"}
 
 
-# ================================================================
-# PricePredictor — AI price predictions
-# ================================================================
+
+
+
 
 class PricePredictor:
-    """
-    Generates AI price predictions for 10 time horizons (1d through 1mo).
-    Uses gpt-5.4 with structured data (technicals + news + macro).
-    Results are cached per symbol for PREDICTION_CACHE_TTL seconds.
-    """
+
+
+
+
+
 
     def __init__(self, scanner, news_analyzer, openai_client: OpenAI = None):
         self.scanner = scanner
@@ -413,7 +413,7 @@ class PricePredictor:
         self._calls_this_hour: List[float] = []
 
     def predict_fast(self, symbol: str) -> List[Dict]:
-        """Algorithmic predictions based on technicals only — no LLM, instant."""
+
         snapshots = self.scanner.get_snapshots([symbol])
         snap = snapshots.get(symbol)
         if not snap or not snap.latest_trade:
@@ -423,12 +423,12 @@ class PricePredictor:
         df = self.scanner.get_daily_bars(symbol, days=200)
         ind = self.scanner.compute_indicators(df) if df is not None else {}
 
-        # Calculate base daily move from ATR
+
         atr = ind.get("atr", 0) or 0
         natr = ind.get("natr", 0) or (atr / price * 100 if price else 0)
-        daily_pct = natr if natr else 1.0  # fallback 1%
+        daily_pct = natr if natr else 1.0
 
-        # Directional bias from technicals
+
         rsi14 = ind.get("rsi_14", 50) or 50
         macd_cross = ind.get("macd_cross", "none")
         ibs = ind.get("ibs", 0.5) or 0.5
@@ -458,22 +458,22 @@ class PricePredictor:
         if consec_down >= 3:
             bias += 0.2; reasons.append(f"{consec_down} consecutive down days — bounce likely")
 
-        # Ensure a minimum bias so predictions are never all zero
+
         if abs(bias) < 0.05:
-            # Default slight upward drift (historical market avg ~0.04%/day)
+
             bias = 0.05
             reasons.append("slight mean drift")
 
         reason_str = "; ".join(reasons) if reasons else "Neutral technicals"
 
-        # Map horizons to trading days
+
         horizon_days = {"1d":1,"2d":2,"3d":3,"4d":4,"5d":5,"1w":5,"2w":10,"3w":15,"4w":20,"1mo":22}
         predictions = []
         for h in PREDICTION_HORIZONS:
             days = horizon_days.get(h, 5)
-            expected = bias * daily_pct * (days ** 0.5)  # sqrt scaling
-            expected = round(expected, 2) or 0.01  # never exactly 0
-            conf = max(30, 80 - days * 2)  # confidence decays with horizon
+            expected = bias * daily_pct * (days ** 0.5)
+            expected = round(expected, 2) or 0.01
+            conf = max(30, 80 - days * 2)
             direction = "up" if expected > 0.1 else ("down" if expected < -0.1 else "flat")
             predictions.append({
                 "horizon": h,
@@ -485,12 +485,12 @@ class PricePredictor:
         return predictions
 
     def predict(self, symbol: str, use_cache: bool = True) -> List[Dict]:
-        """
-        Return AI price predictions for all horizons.
 
-        Returns:
-            [{horizon, expected_pct, confidence, direction, reasoning}, ...]
-        """
+
+
+
+
+
         now = _time.time()
 
         if use_cache and symbol in self._cache:
@@ -498,12 +498,12 @@ class PricePredictor:
             if now - ts < PREDICTION_CACHE_TTL:
                 return cached
 
-        # Rate limit
+
         self._calls_this_hour = [t for t in self._calls_this_hour if now - t < 3600]
         if len(self._calls_this_hour) >= MAX_PREDICTION_CALLS_PER_HOUR:
             return [{"error": "Rate limit reached. Try again later."}]
 
-        # Gather data
+
         snapshots = self.scanner.get_snapshots([symbol])
         snap = snapshots.get(symbol)
         if not snap or not snap.latest_trade:
@@ -516,7 +516,7 @@ class PricePredictor:
         df = self.scanner.get_daily_bars(symbol, days=200)
         indicators = self.scanner.compute_indicators(df) if df is not None else {}
 
-        # Price history for context
+
         price_history = ""
         high_52w, low_52w = price, price
         if df is not None and len(df) >= 20:
@@ -525,7 +525,7 @@ class PricePredictor:
             high_52w = max(df["high"].tolist())
             low_52w = min(df["low"].tolist())
 
-        # News context
+
         news_result = self.news.check_structural_risk(symbol, price)
         news_ctx = f"News score: {news_result.get('news_score', 50)}/100, Vetoed: {news_result.get('vetoed', False)}"
         analyses = news_result.get("analyses", [])
@@ -536,7 +536,7 @@ class PricePredictor:
             )
             news_ctx += f"\nRecent:\n{headlines}"
 
-        # Macro context
+
         regime = self.scanner.get_regime()
         spy_chg = self.scanner.get_spy_change()
         man_vars = self.scanner.get_man_group_vars()
@@ -581,7 +581,7 @@ Return pure JSON array:
                 max_completion_tokens=4000,
             )
             content = response.choices[0].message.content.strip()
-            # Extract JSON from response (may have markdown fences)
+
             if "```" in content:
                 import re
                 m = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
@@ -589,7 +589,7 @@ Return pure JSON array:
                     content = m.group(1).strip()
             data = json.loads(content)
 
-            # Handle both direct array and wrapped object
+
             if isinstance(data, list):
                 predictions = data
             elif isinstance(data, dict):
@@ -608,15 +608,15 @@ Return pure JSON array:
             return [{"error": str(e)}]
 
 
-# ================================================================
-# PortfolioAnalyzer — Per-position health + recommendations
-# ================================================================
+
+
+
 
 class PortfolioAnalyzer:
-    """
-    Analyzes all held positions: runs scoring + prediction for each,
-    then produces a Hold/Sell/Add recommendation.
-    """
+
+
+
+
 
     def __init__(self, scorer: StockScorer, predictor: PricePredictor, executor):
         self.scorer = scorer
@@ -625,15 +625,15 @@ class PortfolioAnalyzer:
         self._cache: Optional[Tuple[float, List[Dict]]] = None
 
     def analyze(self, use_cache: bool = True, fast_mode: bool = False) -> List[Dict]:
-        """
-        Return analysis for every position in the portfolio.
-        fast_mode=True: instant results using algorithmic scoring only (no LLM).
-        fast_mode=False: full analysis with LLM scoring + predictions (slow).
-        """
+
+
+
+
+
         now = _time.time()
         if use_cache and self._cache:
             ts, cached = self._cache
-            ttl = 3600 if not fast_mode else 120  # 1hr for full, 2min for fast
+            ttl = 3600 if not fast_mode else 120
             if now - ts < ttl:
                 return cached
 
@@ -672,14 +672,14 @@ class PortfolioAnalyzer:
                 return {**pos, "symbol": symbol, "error": str(e)}
 
         if fast_mode:
-            # Fast: run in parallel, no LLM
+
             results = []
             with ThreadPoolExecutor(max_workers=min(len(positions), 4)) as pool:
                 futures = {pool.submit(_analyze_one, p): p for p in positions}
                 for f in as_completed(futures):
                     results.append(f.result())
         else:
-            # Full: run in parallel but LLM calls are serialized by _llm_lock
+
             results = []
             with ThreadPoolExecutor(max_workers=min(len(positions), 4)) as pool:
                 futures = {pool.submit(_analyze_one, p): p for p in positions}
@@ -690,17 +690,17 @@ class PortfolioAnalyzer:
         return results
 
     def _recommend(self, pos: Dict, scores: Dict, predictions: List[Dict]) -> Tuple[str, str]:
-        """Generate Hold/Sell/Add recommendation with reasoning."""
+
         composite = scores.get("composite", 50)
         pnl_pct = pos.get("unrealized_pnl_pct", 0)
 
-        # Check short-term prediction
+
         short_outlook = 0
         for p in predictions:
             if isinstance(p, dict) and p.get("horizon") in ("1d", "2d", "3d"):
                 short_outlook += p.get("expected_pct", 0)
 
-        # Decision logic
+
         if composite < 40 and pnl_pct < -3:
             return "Sell", f"Low score ({composite}) + significant loss ({pnl_pct:+.1f}%)"
         if composite < 40 and short_outlook < -1:
@@ -717,28 +717,28 @@ class PortfolioAnalyzer:
         return "Watch", f"Below-average score ({composite}) — monitor closely"
 
 
-# ================================================================
-# Deep Analysis — comprehensive single-stock research
-# ================================================================
+
+
+
 
 def deep_analyze(symbol: str, scorer: StockScorer, predictor: PricePredictor,
                  news_analyzer) -> Dict:
-    """
-    Run a comprehensive deep analysis on a single stock.
-    Combines scoring, predictions, news, and technicals.
-    """
+
+
+
+
     scores = scorer.score_stock(symbol, use_cache=False)
     if "error" in scores:
         return scores
 
     predictions = predictor.predict(symbol, use_cache=False)
 
-    # Get comprehensive news
+
     news_items = news_analyzer.get_news(symbol, limit=10)
     news_summary = news_analyzer.check_structural_risk(symbol)
     deep_news = news_analyzer.analyze_deep(symbol, news_items) if news_items else None
 
-    # Web search for latest info
+
     web_info = news_analyzer.web_search_supplement(symbol)
 
     return {

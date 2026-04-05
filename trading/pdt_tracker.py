@@ -1,7 +1,7 @@
-"""
-PDT Tracker - Rolling 5 trading day window day trade count
-Iron rule: never allow a 4th day trade under any circumstance
-"""
+
+
+
+
 import json
 import os
 from datetime import datetime, timedelta
@@ -30,7 +30,7 @@ class PDTTracker:
             json.dump(self.trades, f, indent=2, default=str)
 
     def _get_trading_days(self, n: int) -> datetime:
-        """Go back n trading days (skip weekends)"""
+
         dt = datetime.now(ET)
         count = 0
         while count < n:
@@ -53,7 +53,7 @@ class PDTTracker:
         return PDT_MAX_DAY_TRADES - len(self.get_trades_in_window())
 
     def record_day_trade(self, ticker: str, pnl: float = 0):
-        """Record a day trade (same-day open and close)"""
+
         trade = {
             "date": datetime.now(ET).isoformat(),
             "ticker": ticker,

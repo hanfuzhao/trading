@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""
-Trading Bot v6 - CLI entry point (deprecated, main entry is dashboard_server.py)
-This file is kept only for --status to view account status.
-"""
+
+
+
+
 import argparse
 import sys
 from datetime import date

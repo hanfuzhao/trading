@@ -1,8 +1,8 @@
-"""
-Tool Registry — 7 tools for the LLM Trading Agent.
-Each tool wraps existing modules (scanner, executor, etc.) into
-a callable function with an OpenAI function-calling JSON schema.
-"""
+
+
+
+
+
 import json
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -10,9 +10,9 @@ from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
 
-# ================================================================
-# Tool JSON Schemas (OpenAI function-calling format)
-# ================================================================
+
+
+
 
 TOOL_DEFINITIONS = [
     {
@@ -144,7 +144,7 @@ TOOL_DEFINITIONS = [
             },
         },
     },
-    # ── Research Platform Tools ──────────────────────────────
+
     {
         "type": "function",
         "function": {
@@ -255,16 +255,16 @@ TOOL_DEFINITIONS = [
 ]
 
 
-# ================================================================
-# Tool Registry — wires schemas to implementations
-# ================================================================
+
+
+
 
 class ToolRegistry:
-    """
-    Holds references to the initialized trading components and
-    exposes each tool as a method.  The agent calls
-    ``registry.call(tool_name, **kwargs)`` which dispatches here.
-    """
+
+
+
+
+
 
     def __init__(self, scanner=None, executor=None, risk_manager=None,
                  news_analyzer=None, pdt_tracker=None,
@@ -302,9 +302,9 @@ class ToolRegistry:
         except Exception as e:
             return {"error": str(e)}
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 1: get_stock_data
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def get_stock_data(self, symbol: str) -> Dict:
         symbol = symbol.upper().strip()
@@ -332,9 +332,9 @@ class ToolRegistry:
             "timestamp": datetime.now(ET).isoformat(),
         }
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 2: search_news
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def search_news(self, symbol: str) -> Dict:
         symbol = symbol.upper().strip()
@@ -353,9 +353,9 @@ class ToolRegistry:
             "analyses": result.get("analyses", []),
         }
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 3: scan_overnight
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def scan_overnight(self) -> Dict:
         candidates = self.scanner.scan_overnight()
@@ -377,9 +377,9 @@ class ToolRegistry:
             "scan_time": datetime.now(ET).isoformat(),
         }
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 4: scan_intraday
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def scan_intraday(self) -> Dict:
         candidates = self.scanner.scan_intraday()
@@ -399,9 +399,9 @@ class ToolRegistry:
             "scan_time": datetime.now(ET).isoformat(),
         }
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 5: get_portfolio
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def get_portfolio(self) -> Dict:
         acct = self.executor.get_account()
@@ -425,9 +425,9 @@ class ToolRegistry:
             "timestamp": datetime.now(ET).isoformat(),
         }
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 6: get_macro_environment
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def get_macro_environment(self) -> Dict:
         return {
@@ -441,9 +441,9 @@ class ToolRegistry:
             "timestamp": datetime.now(ET).isoformat(),
         }
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 7: execute_trade
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def execute_trade(self, symbol: str, side: str, qty: int,
                       strategy: str, limit_price: float = 0) -> Dict:
@@ -479,7 +479,7 @@ class ToolRegistry:
 
         if strategy == "overnight":
             if self.pdt:
-                pass  # overnight doesn't consume PDT
+                pass
             positions = self.executor.get_positions()
             current_on = [t for t, v in self.executor.overnight_trades.items() if v.get("status") == "held"]
             ok, msg, params = self.risk.validate_overnight(
@@ -498,7 +498,7 @@ class ToolRegistry:
             ok, msg = self.executor.enter_overnight(symbol, shares, limit_price, atr, natr)
             return {"success": ok, "message": msg, "shares": shares, "price": limit_price}
 
-        else:  # intraday
+        else:
             if self.pdt and not self.pdt.can_day_trade():
                 return {"success": False, "message": "No PDT day-trade slots remaining"}
             df = self.scanner.get_daily_bars(symbol)
@@ -522,9 +522,9 @@ class ToolRegistry:
                 self.pdt.record_day_trade(symbol)
             return {"success": ok, "message": msg, "shares": shares, "price": limit_price}
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 8: get_stock_analysis (Research)
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def get_stock_analysis(self, symbol: str) -> Dict:
         symbol = symbol.upper().strip()
@@ -534,9 +534,9 @@ class ToolRegistry:
         from core.research import deep_analyze
         return deep_analyze(symbol, self.scorer, self.predictor, self.news)
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 9: predict_price (Research)
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def predict_price(self, symbol: str) -> Dict:
         symbol = symbol.upper().strip()
@@ -546,9 +546,9 @@ class ToolRegistry:
         predictions = self.predictor.predict(symbol)
         return {"symbol": symbol, "predictions": predictions}
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 10: scan_research (Research)
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def scan_research(self, sectors: List = None, min_price: float = 10,
                       max_price: float = 999999, sort_by: str = "change_pct",
@@ -562,7 +562,7 @@ class ToolRegistry:
         }
         candidates = self.scanner.scan_research(filters)
 
-        # Score top 10
+
         scored = []
         for c in candidates[:10]:
             if self.scorer:
@@ -580,9 +580,9 @@ class ToolRegistry:
             "scored_count": min(10, len(candidates)),
         }
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 11: get_portfolio_analysis (Research)
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def get_portfolio_analysis(self) -> Dict:
         if not self.portfolio_analyzer:
@@ -595,12 +595,12 @@ class ToolRegistry:
             "timestamp": datetime.now(ET).isoformat(),
         }
 
-    # ────────────────────────────────────────────────────────────
-    # Tool 12: get_sector_analysis (Research)
-    # ────────────────────────────────────────────────────────────
+
+
+
 
     def get_sector_analysis(self) -> Dict:
-        # Representative stocks per sector
+
         sector_reps = {
             "Technology": ["AAPL", "MSFT", "NVDA"],
             "Healthcare": ["UNH", "JNJ", "PFE"],
@@ -632,7 +632,7 @@ class ToolRegistry:
                 "tier": "Strong" if avg >= 70 else ("Moderate" if avg >= 50 else "Weak"),
             }
 
-        # Sort by score
+
         ranked = sorted(sector_scores.items(), key=lambda x: x[1]["avg_composite"], reverse=True)
 
         return {

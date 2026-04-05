@@ -1,6 +1,6 @@
-"""
-Order Executor v6 - Overnight/intraday position separation | Pre-market stop | Bracket Order | Extended hours
-"""
+
+
+
 import json
 import os
 import time as _time
@@ -34,9 +34,9 @@ class OrderExecutor:
         self.intraday_trades: Dict[str, Dict] = {}
         self._stop_order_ids: Dict[str, str] = {}
 
-    # ================================================================
-    # Account
-    # ================================================================
+
+
+
 
     def get_account(self) -> Dict:
         account = self.client.get_account()
@@ -64,9 +64,9 @@ class OrderExecutor:
     def get_available_cash(self) -> float:
         return float(self.client.get_account().cash)
 
-    # ================================================================
-    # Overnight Entry (15:30-15:45 Limit Order, no mechanical stop)
-    # ================================================================
+
+
+
 
     def enter_overnight(self, ticker: str, shares: int, limit_price: float,
                         atr: float, natr: float) -> Tuple[bool, str]:
@@ -103,9 +103,9 @@ class OrderExecutor:
             print(f"[Executor] Overnight entry failed ({ticker}): {e}")
             return False, str(e)
 
-    # ================================================================
-    # Overnight Exit (9:45-10:15, based on gap direction)
-    # ================================================================
+
+
+
 
     def exit_overnight(self, ticker: str, current_price: float, reason: str = "") -> Tuple[bool, float]:
         if ticker not in self.overnight_trades:
@@ -130,9 +130,9 @@ class OrderExecutor:
             print(f"[Executor] Overnight exit failed ({ticker}): {e}")
             return False, 0
 
-    # ================================================================
-    # Pre-market Stop (4:00 AM, extended hours Limit Sell)
-    # ================================================================
+
+
+
 
     def submit_premarket_stop(self, ticker: str, shares: int, price: float) -> bool:
         try:
@@ -151,9 +151,9 @@ class OrderExecutor:
             print(f"[Executor] Pre-market stop failed ({ticker}): {e}")
             return False
 
-    # ================================================================
-    # Intraday Entry (14:00-14:45, Limit + Stop-Limit bracket)
-    # ================================================================
+
+
+
 
     def enter_intraday(self, ticker: str, shares: int, limit_price: float,
                        stop_loss: float, take_profit_1: float, take_profit_2: float,
@@ -208,9 +208,9 @@ class OrderExecutor:
         except Exception as e:
             print(f"[Executor] Stop-loss setup failed ({ticker}): {e}")
 
-    # ================================================================
-    # Intraday Management (partial take-profit + trailing + time stop)
-    # ================================================================
+
+
+
 
     def update_trailing_stop(self, ticker: str, current_price: float):
         if ticker not in self.intraday_trades:
@@ -287,9 +287,9 @@ class OrderExecutor:
         except Exception as e:
             print(f"[Executor] Trailing stop update failed ({ticker}): {e}")
 
-    # ================================================================
-    # Close Positions
-    # ================================================================
+
+
+
 
     def close_intraday(self, ticker: str) -> bool:
         try:
@@ -308,7 +308,7 @@ class OrderExecutor:
             return False
 
     def close_all_intraday(self) -> List[Dict]:
-        """15:48 - Market close all intraday positions (keep overnight)"""
+
         closed = []
         positions = self.get_positions()
         overnight_tickers = {t for t, v in self.overnight_trades.items() if v["status"] == "held"}
@@ -320,7 +320,7 @@ class OrderExecutor:
         return closed
 
     def confirm_zero_intraday(self) -> bool:
-        """15:50 - Confirm zero intraday positions (overnight retained)"""
+
         positions = self.get_positions()
         overnight_tickers = {t for t, v in self.overnight_trades.items() if v["status"] == "held"}
         active_intraday = [
@@ -360,9 +360,9 @@ class OrderExecutor:
                 print(f"[Executor] Intraday {ticker} auto-closed PnL${pnl:+.2f}")
         return closed
 
-    # ================================================================
-    # Utilities
-    # ================================================================
+
+
+
 
     def _wait_for_fill(self, order_id: str, timeout: int = 120) -> Optional[float]:
         deadline = _time.time() + timeout

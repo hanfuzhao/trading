@@ -1,6 +1,6 @@
-"""
-Risk Manager v6 - 3-variable Regime matrix | Overnight/intraday separation | Sector correlation | Daily loss 2%
-"""
+
+
+
 import json
 import os
 from datetime import datetime, date, timedelta
@@ -67,9 +67,9 @@ class RiskManager:
                 "paused_until": self.paused_until.isoformat() if self.paused_until else None,
             }, f, indent=2)
 
-    # ================================================================
-    # Pre-trade Check
-    # ================================================================
+
+
+
 
     def can_trade(self, portfolio_value: float) -> Tuple[bool, str]:
         today_et = datetime.now(ET).date()
@@ -115,9 +115,9 @@ class RiskManager:
 
         return True, "OK to trade"
 
-    # ================================================================
-    # Overnight Position Validation
-    # ================================================================
+
+
+
 
     def validate_overnight(
         self, ticker: str, price: float, portfolio_value: float,
@@ -153,9 +153,9 @@ class RiskManager:
             "risk_pct": round(total_risk_pct, 2),
         }
 
-    # ================================================================
-    # Intraday Position Validation
-    # ================================================================
+
+
+
 
     def validate_intraday(
         self, ticker: str, price: float, stop_loss: float,
@@ -194,9 +194,9 @@ class RiskManager:
             "entry_price": price, "stop_loss": stop_loss,
         }
 
-    # ================================================================
-    # Intraday Stop-loss/Take-profit Calculation
-    # ================================================================
+
+
+
 
     def calculate_intraday_stops(self, price: float, atr: float, regime: str) -> Dict:
         params = REGIME_PARAMS.get(regime, REGIME_PARAMS["cautious"])
@@ -207,9 +207,9 @@ class RiskManager:
         tp2 = round(price + stop_dist * 2, 2)
         return {"stop_loss": stop_loss, "take_profit_1": tp1, "take_profit_2": tp2, "stop_distance": round(stop_dist, 2)}
 
-    # ================================================================
-    # Record
-    # ================================================================
+
+
+
 
     def record_trade_result(self, pnl: float):
         self.daily_pnl += pnl

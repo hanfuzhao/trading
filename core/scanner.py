@@ -1,10 +1,10 @@
-"""
-Market Scanner v6
-Overnight scan: RSI(2)<15 + IBS<0.25 + NATR ranking
-Intraday scan: afternoon mean reversion (14:00-14:45 window)
-3-variable Regime: VIX/VIX3M + SPY/200SMA + VIX absolute level
-Man Group 7-variable macro analogy
-"""
+
+
+
+
+
+
+
 import json
 import os
 import numpy as np
@@ -73,9 +73,9 @@ class MarketScanner:
         self._uso_change: float = 0
         self._man_group_vars: Dict = {}
 
-    # ================================================================
-    # Stock Universe
-    # ================================================================
+
+
+
 
     def get_tradeable_universe(self, force_refresh: bool = False) -> List[str]:
         if self._universe and not force_refresh:
@@ -91,9 +91,9 @@ class MarketScanner:
         print(f"[Scanner] Tradeable stocks: {len(self._universe)}")
         return self._universe
 
-    # ================================================================
-    # Data Retrieval
-    # ================================================================
+
+
+
 
     def get_snapshots(self, symbols: List[str]) -> Dict:
         all_snapshots = {}
@@ -129,9 +129,9 @@ class MarketScanner:
         except Exception:
             return None
 
-    # ================================================================
-    # Market Environment (daily refresh)
-    # ================================================================
+
+
+
 
     def refresh_market_data(self):
         self._refresh_spy_data()
@@ -164,9 +164,9 @@ class MarketScanner:
         except Exception:
             pass
 
-    # ================================================================
-    # 3-Variable Regime Detection (v6 Chapter 5)
-    # ================================================================
+
+
+
 
     def _detect_regime(self):
         vixy_df = self.get_daily_bars("VIXY", days=25)
@@ -192,9 +192,9 @@ class MarketScanner:
 
         print(f"[Scanner] Regime: {self._regime} | VIX/VIX3M={self._vix_vix3m_ratio:.3f} | SPY>200SMA={self._spy_above_200sma} | VIXY={self._vixy_price:.2f}")
 
-    # ================================================================
-    # Man Group 7 Variables
-    # ================================================================
+
+
+
 
     def _compute_man_group_vars(self):
         v = {}
@@ -226,9 +226,9 @@ class MarketScanner:
         v["vixy_price"] = round(self._vixy_price, 2)
         self._man_group_vars = v
 
-    # ================================================================
-    # Technical Indicators
-    # ================================================================
+
+
+
 
     def compute_indicators(self, df: pd.DataFrame) -> Dict:
         close, high, low, volume = df["close"], df["high"], df["low"], df["volume"]
@@ -273,9 +273,9 @@ class MarketScanner:
             "avg_volume_20": int(volume.tail(20).mean()),
         }
 
-    # ================================================================
-    # Overnight Scan (v6 Ch.1: RSI(2)<15 + IBS<0.25 + NATR ranking)
-    # ================================================================
+
+
+
 
     def scan_overnight(self) -> List[Dict]:
         universe = self.get_tradeable_universe()
@@ -348,9 +348,9 @@ class MarketScanner:
         print(f"[Scanner] Overnight candidates: {len(detailed)} (RSI(2)<{RSI_2_THRESHOLD} AND IBS<{IBS_THRESHOLD})")
         return detailed
 
-    # ================================================================
-    # Intraday Scan (v6: afternoon mean reversion, 14:00-14:45)
-    # ================================================================
+
+
+
 
     def scan_intraday(self) -> List[Dict]:
         universe = self.get_tradeable_universe()
@@ -430,16 +430,16 @@ class MarketScanner:
         print(f"[Scanner] Intraday candidates: {len(detailed)}")
         return detailed
 
-    # ================================================================
-    # Extended Technical Indicators (for research mode)
-    # ================================================================
+
+
+
 
     def compute_extended_indicators(self, df: pd.DataFrame) -> Dict:
-        """Compute full indicator set including SMA/EMA/52w range/ROC."""
+
         base = self.compute_indicators(df)
         close = df["close"]
 
-        # Moving averages
+
         if len(df) >= 50:
             base["sma_50"] = round(close.tail(50).mean(), 2)
         if len(df) >= 200:
@@ -448,35 +448,35 @@ class MarketScanner:
         base["ema_9"] = round(ta.trend.EMAIndicator(close, window=9).ema_indicator().iloc[-1], 2)
         base["ema_21"] = round(ta.trend.EMAIndicator(close, window=21).ema_indicator().iloc[-1], 2)
 
-        # 52-week high/low (or max available)
+
         base["high_52w"] = round(df["high"].max(), 2)
         base["low_52w"] = round(df["low"].min(), 2)
         base["pct_from_52w_high"] = round((close.iloc[-1] / df["high"].max() - 1) * 100, 2)
 
-        # Rate of change
+
         if len(df) >= 10:
             base["roc_10"] = round((close.iloc[-1] / close.iloc[-10] - 1) * 100, 2)
         if len(df) >= 20:
             base["roc_20"] = round((close.iloc[-1] / close.iloc[-20] - 1) * 100, 2)
 
-        # Stochastic RSI
+
         stoch_rsi = ta.momentum.StochRSIIndicator(close, window=14)
         base["stoch_rsi_k"] = round(stoch_rsi.stochrsi_k().iloc[-1], 2)
         base["stoch_rsi_d"] = round(stoch_rsi.stochrsi_d().iloc[-1], 2)
 
         return base
 
-    # ================================================================
-    # Research Scan (general purpose, strategy-agnostic)
-    # ================================================================
+
+
+
 
     def scan_research(self, filters: Dict = None) -> List[Dict]:
-        """
-        General-purpose market scan for the research page.
-        Accepts filters: sectors, min_price, max_price, sort_by, limit,
-                         traits (list), horizons (list).
-        Returns stocks with price data and basic indicators.
-        """
+
+
+
+
+
+
         filters = filters or {}
         universe = self.get_tradeable_universe()
         sectors_filter = filters.get("sectors", [])
@@ -486,16 +486,16 @@ class MarketScanner:
         limit = filters.get("limit", 50)
         traits = set(filters.get("traits", []))
 
-        # Filter by sector first if specified
+
         if sectors_filter:
             universe = [s for s in universe if SECTORS.get(s, "Unknown") in sectors_filter]
 
-        # Filter by market cap traits before snapshot (narrow universe)
+
         if "large_cap" in traits and "small_cap" not in traits:
-            # Only keep well-known large caps (rough heuristic: price > 50 or in known list)
-            pass  # applied after snapshot with price filter
+
+            pass
         if "small_cap" in traits and "large_cap" not in traits:
-            pass  # applied after snapshot
+            pass
 
         snapshots = self.get_snapshots(universe)
         candidates = []
@@ -511,7 +511,7 @@ class MarketScanner:
                 change_pct = (price - prev) / prev * 100 if prev else 0
                 today_vol = int(snap.daily_bar.volume) if snap.daily_bar else 0
 
-                # Trait-based pre-filter using snapshot data
+
                 if "large_cap" in traits and price < 50:
                     continue
                 if "small_cap" in traits and price > 50:
@@ -527,7 +527,7 @@ class MarketScanner:
             except Exception:
                 continue
 
-        # Sort
+
         reverse = sort_by not in ("change_pct_asc",)
         sort_key = sort_by.replace("_asc", "").replace("_desc", "")
         if sort_key == "change_pct":
@@ -541,9 +541,9 @@ class MarketScanner:
 
         return candidates[:limit]
 
-    # ================================================================
-    # Public Queries
-    # ================================================================
+
+
+
 
     def get_regime(self) -> str:
         return self._regime
